@@ -176,6 +176,94 @@ async function checkFBTarget(input) {
   }
 }
 
+/**
+ * KIỂM TRA TRẠNG THÁI TÀI KHOẢN TIKTOK (LIVE / DIE) TỪ LINK HOẶC USERNAME
+ */
+async function checkTikTokTarget(input) {
+  let text = input.trim();
+  let username = null;
+
+  // 1. Nếu là link vt.tiktok.com hoặc vm.tiktok.com -> giải mã redirect lấy link gốc
+  if (text.includes('vt.tiktok.com') || text.includes('vm.tiktok.com')) {
+    try {
+      if (!text.startsWith('http')) text = 'https://' + text;
+      const res = await fetch(text, {
+        method: 'HEAD',
+        redirect: 'follow',
+        headers: { 'User-Agent': 'facebookexternalhit/1.1' }
+      });
+      text = res.url || text;
+    } catch (e) {}
+  }
+
+  // 2. Trích xuất username từ link hoặc chuỗi nhập
+  const match = text.match(/@([a-zA-Z0-9_.]+)/);
+  if (match) {
+    username = match[1];
+  } else if (/^[a-zA-Z0-9_.]+$/.test(text) && !text.includes('http') && !text.includes('/')) {
+    username = text.replace(/^@/, '');
+  }
+
+  if (!username) {
+    return {
+      success: false,
+      reason: 'Không tìm thấy username TikTok! Hãy gửi link dạng: https://www.tiktok.com/@username hoặc @username'
+    };
+  }
+
+  try {
+    const profileUrl = 'https://www.tiktok.com/@' + username;
+    const res = await fetch(profileUrl, {
+      headers: { 'User-Agent': 'facebookexternalhit/1.1' }
+    });
+
+    const html = await res.text();
+    const ogTitle = (html.match(/property="og:title" content="([^"]+)"/) || [])[1] || '';
+    const ogDesc = (html.match(/property="og:description" content="([^"]+)"/) || [])[1] || '';
+
+    const isDie = ogTitle.includes('Visit TikTok to discover') || 
+                  ogTitle.includes("Couldn't find this account") || 
+                  ogDesc.includes('Watch, follow, and discover more');
+
+    if (isDie) {
+      return {
+        success: true,
+        live: false,
+        username: username,
+        profileUrl: profileUrl,
+        reason: 'Tài khoản không tồn tại, đã bị đình chỉ (Die) hoặc bị cấm!'
+      };
+    }
+
+    let nickname = ogTitle.replace(/\s+on TikTok$/i, '').trim();
+    if (!nickname) nickname = username;
+
+    let followers = 'N/A', following = 'N/A', likes = 'N/A';
+    const statMatch = ogDesc.match(/([0-9.,KMBkmb]+)\s+Followers?,\s+([0-9.,KMBkmb]+)\s+Following,\s+([0-9.,KMBkmb]+)\s+Likes?/i);
+    if (statMatch) {
+      followers = statMatch[1];
+      following = statMatch[2];
+      likes = statMatch[3];
+    }
+
+    return {
+      success: true,
+      live: true,
+      username: username,
+      nickname: nickname,
+      followers: followers,
+      following: following,
+      likes: likes,
+      profileUrl: profileUrl
+    };
+  } catch (err) {
+    return {
+      success: false,
+      reason: 'Lỗi kết nối tới máy chủ TikTok: ' + err.message
+    };
+  }
+}
+
 // =========================================================================
 // =========================================================================
 // 🧠 NÃO TRICKER AI SIÊU TỐC (GEMINI 3.5 FLASH LITE + CACHE + MULTI-FALLBACK)
@@ -1269,19 +1357,68 @@ async function startBot() {
       }
 
       // -------------------------------------------------------------
-      // LỆNH 3: CHECK TRẠNG THÁI UID HOẶC LINK FB (/check <uid/link>)
+      // LỆNH 3: CHECK TRẠNG THÁI TÀI KHOẢN TIKTOK HOẶC FACEBOOK (/check <link/uid/id>, /tik <link/id>)
       // -------------------------------------------------------------
-      if (lowerContent.startsWith('/check') || lowerContent.startsWith('check ')) {
+      const isTikCommand = lowerContent.startsWith('/tik') || lowerContent.startsWith('tik ') || lowerContent.startsWith('/tiktok') || lowerContent.startsWith('tiktok ');
+      const isCheckCommand = lowerContent.startsWith('/check') || lowerContent.startsWith('check ');
+
+      if (isTikCommand || isCheckCommand) {
         if (isRateLimited(uidFrom)) return;
 
         const parts = trimmed.split(/\s+/);
         const target = parts[1];
 
         if (!target) {
-          await api.sendMessage('⚠️ Vui lòng nhập UID hoặc link Facebook! Cú pháp: /check <UID_HOẶC_LINK>', threadId, ThreadType.Group);
+          await api.sendMessage('⚠️ Vui lòng nhập link hoặc ID cần check!\n🔹 Check TikTok: /check <link_tiktok_hoặc_@username> (hoặc /tik <link>)\n🔹 Check Facebook: /check <UID_hoặc_link_FB>', threadId, ThreadType.Group);
           return;
         }
 
+        // Tự động phân loại xem người dùng muốn check TikTok hay Facebook:
+        const isTikTokTarget = isTikCommand || 
+                               target.includes('tiktok.com') || 
+                               target.startsWith('@') || 
+                               target.includes('vt.tiktok.com') ||
+                               target.includes('vm.tiktok.com');
+
+        if (isTikTokTarget) {
+          console.log(`🎵 [CHECK TIKTOK] Đang kiểm tra mục tiêu: ${target}...`);
+          const tikStatus = await checkTikTokTarget(target);
+
+          if (!tikStatus.success) {
+            await api.sendMessage(`❌ ${tikStatus.reason}`, threadId, ThreadType.Group);
+            return;
+          }
+
+          let checkMsg = '';
+          if (tikStatus.live) {
+            checkMsg = 
+`┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+   🎵 𝐊Ế𝐓 𝐐𝐔Ả 𝐂𝐇𝐄𝐂𝐊 𝐓𝐈𝐊𝐓𝐎𝐊 🎵
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+👤 Nickname: ${tikStatus.nickname}
+🎯 ID: @${tikStatus.username}
+🟢 Trạng thái: LIVE (Đang hoạt động bình thường)
+👥 Followers: ${tikStatus.followers} | Đang theo dõi: ${tikStatus.following}
+❤️ Lượt thích: ${tikStatus.likes}
+🔗 Profile: ${tikStatus.profileUrl}`;
+          } else {
+            checkMsg = 
+`┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+   🎵 𝐊Ế𝐓 𝐐𝐔Ả 𝐂𝐇𝐄𝐂𝐊 𝐓𝐈𝐊𝐓𝐎𝐊 🎵
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+🎯 ID: @${tikStatus.username}
+🔴 Trạng thái: DIE / KHÓA / KHÔNG TỒN TẠI
+⚠️ Tình trạng: ${tikStatus.reason}
+🔗 Profile: ${tikStatus.profileUrl}`;
+          }
+
+          await api.sendMessage(checkMsg, threadId, ThreadType.Group);
+          return;
+        }
+
+        // Xử lý Check Facebook:
         console.log(`🔎 [CHECK FB] Đang check trạng thái mục tiêu: ${target}...`);
         const fbStatus = await checkFBTarget(target);
 
@@ -1493,18 +1630,19 @@ ${aiAnswer}`;
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
 🛠️ 𝐂Ô𝐍𝐆 𝐂Ụ 𝐓𝐑𝐈𝐂𝐊𝐄𝐑:
-🔹 /2fa <secret_key> : Lấy mã OTP 2 bước siêu tốc
-🔹 /check <uid/link> : Kiểm tra UID Facebook Live hay Die
-🔹 /ip <địa_chỉ_ip>  : Tra cứu nguồn gốc mạng & quốc gia
+🔹 /2fa <secret_key>   : Lấy mã OTP 2 bước siêu tốc
+🔹 /check <link/uid>   : Check Live/Die TikTok & Facebook
+🔹 /tik <link/user>    : Tra cứu tài khoản TikTok siêu tốc
+🔹 /ip <địa_chỉ_ip>    : Tra cứu nguồn gốc mạng & quốc gia
 
 🧠 𝐓𝐑Ợ 𝐋Ý 𝐀𝐈:
-🔹 bot ơi <câu hỏi>  : Trò chuyện & giải đáp siêu tốc
+🔹 bot ơi <câu hỏi>    : Trò chuyện & giải đáp siêu tốc
 
 🎮 𝐆𝐈Ả𝐈 𝐓𝐑Í:
-🔹 độ gay @tag       : Quét độ gay xuất bằng chứng nhận VIP
+🔹 độ gay @tag         : Quét độ gay xuất bằng chứng nhận VIP
 
 🛡️ 𝐁Ả𝐎 𝐕Ệ & 𝐐𝐔Ả𝐍 𝐓𝐑Ị:
-🔹 /kick @tag        : Trưởng/Phó nhóm kick thành viên
+🔹 /kick @tag          : Trưởng/Phó nhóm kick thành viên
 🔹 Gỡ link nhóm Zalo & cảnh cáo 3 lần KICK!
 🔹 Chống spam tin: Nhắc 3 lần, lần 4 KICK!`;
 
