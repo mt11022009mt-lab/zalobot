@@ -136,6 +136,19 @@ class BotTests(unittest.TestCase):
         self.assertEqual(info["following_count"], "50")
         self.assertEqual(info["likes_count"], "10.5M")
 
+    def test_creation_date_estimation_and_engagement(self):
+        # Facebook estimation
+        self.assertIn("2004", bot.estimate_facebook_creation("4"))
+        self.assertIn("2008 - 2009", bot.estimate_facebook_creation("100000123456789"))
+        self.assertIn("2023 - 2026", bot.estimate_facebook_creation("61551234567890"))
+
+        # Instagram estimation
+        self.assertIn("2012", bot.estimate_instagram_creation("173560420"))
+
+        # TikTok engagement rate
+        rate = bot.calculate_tiktok_engagement("10M", "1M")
+        self.assertIn("10.0x", rate)
+
 
 if __name__ == "__main__":
     unittest.main()

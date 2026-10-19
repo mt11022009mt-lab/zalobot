@@ -271,6 +271,150 @@ def set_cached_page(url: str, page: str) -> None:
         _HTML_CACHE[url + "/"] = (time.time(), page)
 
 
+# ==============================================================================
+# THUẬT TOÁN GIẢI MÃ DẢI UID & ƯỚC TÍNH THỜI GIAN TẠO TÀI KHOẢN
+# ==============================================================================
+def estimate_facebook_creation(uid_str: str) -> str:
+    """Ước tính thời gian tạo tài khoản Facebook dựa trên phân tích dải UID."""
+    if not uid_str or not uid_str.isdigit():
+        return ""
+
+    uid = int(uid_str)
+
+    # Dải UID cổ 2004 - 2008 (< 10 chữ số)
+    if uid < 1_000_000_000:
+        if uid < 100_000:
+            return "2004 - 2005 (Acc Cực Cổ • Thời kỳ TheFacebook)"
+        elif uid < 10_000_000:
+            return "2006 - 2007 (Acc Cổ đời đầu)"
+        else:
+            return "2007 - 2008 (Acc Cổ)"
+
+    # Dải UID 15 chữ số bắt đầu bằng 1000
+    if uid_str.startswith("1000"):
+        prefix6 = int(uid_str[:6])
+        if prefix6 <= 100000:
+            return "2008 - 2009 (Acc Cổ 15 số)"
+        elif prefix6 <= 100001:
+            return "2009 - 2010"
+        elif prefix6 <= 100003:
+            return "2010 - 2011"
+        elif prefix6 <= 100005:
+            return "2012 - 2013"
+        elif prefix6 <= 100008:
+            return "2013 - 2014"
+        elif prefix6 <= 100015:
+            return "2015 - 2016"
+        elif prefix6 <= 100025:
+            return "2017 - 2018"
+        elif prefix6 <= 100035:
+            return "2018 - 2019"
+        elif prefix6 <= 100055:
+            return "2020 - 2021"
+        elif prefix6 <= 100085:
+            return "2021 - 2022"
+        else:
+            return "2022 - 2023"
+
+    # Dải UID 16 chữ số bắt đầu bằng 6155... (Thế hệ tài khoản mới 2023 - 2026)
+    if uid_str.startswith("6155") or uid_str.startswith("6156") or uid_str.startswith("6157") or len(uid_str) == 16:
+        return "2023 - 2026 (Tài khoản Mới)"
+
+    return "Khoảng 2015 - 2022"
+
+
+def estimate_instagram_creation(user_id_str: str) -> str:
+    """Ước tính thời gian tạo tài khoản Instagram dựa trên phân tích User ID số."""
+    if not user_id_str or not user_id_str.isdigit():
+        return ""
+
+    uid = int(user_id_str)
+    if uid < 500_000:
+        return "Cuối 2010 (Ra mắt sơ khai)"
+    elif uid < 5_000_000:
+        return "Năm 2011 (Instagram sơ khai)"
+    elif uid < 25_000_000:
+        return "Đầu 2012"
+    elif uid < 60_000_000:
+        return "Giữa 2012 (Giai đoạn FB mua lại)"
+    elif uid < 200_000_000:
+        return "Khoảng 2012 - 2013"
+    elif uid < 450_000_000:
+        return "Khoảng 2013 - 2014"
+    elif uid < 1_200_000_000:
+        return "Khoảng 2015 - 2016"
+    elif uid < 4_000_000_000:
+        return "Khoảng 2017 - 2018"
+    elif uid < 10_000_000_000:
+        return "Khoảng 2019 - 2020"
+    elif uid < 30_000_000_000:
+        return "Khoảng 2021 - 2022"
+    elif uid < 60_000_000_000:
+        return "Khoảng 2023 - 2024"
+    else:
+        return "Khoảng 2025 - 2026 (Tài khoản Mới)"
+
+
+def extract_facebook_uid(page: str, identifier: str) -> str | None:
+    if identifier.isdigit():
+        return identifier
+    m = re.search(r'content="fb://(?:profile|page|group)/(\d+)"', page, re.I)
+    if m:
+        return m.group(1)
+    m = re.search(r'"entity_id":"(\d+)"', page)
+    if m:
+        return m.group(1)
+    m = re.search(r'"userID":"(\d+)"', page)
+    if m:
+        return m.group(1)
+    return None
+
+
+def extract_instagram_uid(page: str) -> str | None:
+    m = re.search(r'"(?:user_id|profile_id)":"(\d+)"', page)
+    if m:
+        return m.group(1)
+    m = re.search(r'"id":"(\d{6,})"', page)
+    if m:
+        return m.group(1)
+    return None
+
+
+def parse_stat_multiplier(val_str: str) -> float | None:
+    if not val_str:
+        return None
+    cleaned = str(val_str).strip().upper().replace(",", "")
+    try:
+        if cleaned.endswith("K"):
+            return float(cleaned[:-1]) * 1_000
+        elif cleaned.endswith("M"):
+            return float(cleaned[:-1]) * 1_000_000
+        elif cleaned.endswith("B"):
+            return float(cleaned[:-1]) * 1_000_000_000
+        return float(cleaned)
+    except Exception:
+        return None
+
+
+def calculate_tiktok_engagement(likes_str: str, followers_str: str) -> str:
+    likes = parse_stat_multiplier(likes_str)
+    followers = parse_stat_multiplier(followers_str)
+    if likes and followers and followers > 0:
+        ratio = likes / followers
+        if ratio >= 15.0:
+            level = "Cực kỳ bùng nổ 🔥"
+        elif ratio >= 8.0:
+            level = "Rất cao ⚡"
+        elif ratio >= 3.0:
+            level = "Ổn định ✨"
+        elif ratio >= 1.0:
+            level = "Trung bình 📊"
+        else:
+            level = "Thấp / Mới xây 📉"
+        return f"<code>{ratio:.1f}x</code> tim/follower ({level})"
+    return ""
+
+
 def lookup_tiktok_public(username: str, timeout: float = 6.0) -> dict | None:
     url = f"https://www.tiktok.com/@{username}"
     page = get_cached_page(url)
@@ -301,6 +445,12 @@ def lookup_tiktok_public(username: str, timeout: float = 6.0) -> dict | None:
             info["follower_count"] = stats.group(1).upper()
             info["following_count"] = stats.group(2).upper()
             info["likes_count"] = stats.group(3).upper()
+
+    if "likes_count" in info and "follower_count" in info:
+        eng = calculate_tiktok_engagement(info["likes_count"], info["follower_count"])
+        if eng:
+            info["engagement_rate"] = eng
+
     return info if info else None
 
 
@@ -334,6 +484,59 @@ def lookup_instagram_public(username: str, timeout: float = 6.0) -> dict | None:
             info["follower_count"] = stats.group(1).upper()
             info["following_count"] = stats.group(2).upper()
             info["video_count"] = stats.group(3).upper()
+
+    uid = extract_instagram_uid(page)
+    if uid:
+        info["numeric_id"] = uid
+        created = estimate_instagram_creation(uid)
+        if created:
+            info["created_time_estimate"] = created
+
+    return info if info else None
+
+
+def lookup_facebook_public(identifier: str, timeout: float = 6.0) -> dict | None:
+    url = f"https://www.facebook.com/{identifier}/"
+    page = get_cached_page(url)
+    if not page:
+        req = Request(url, headers={"User-Agent": USER_AGENT_TELEGRAM, "Accept-Language": "en-US,en;q=0.9", "Referer": "https://www.facebook.com/"})
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                page = resp.read().decode("utf-8", errors="ignore")
+                set_cached_page(url, page)
+        except Exception:
+            return None
+
+    info = {}
+    uid = extract_facebook_uid(page, identifier)
+    if uid:
+        info["numeric_id"] = uid
+        created = estimate_facebook_creation(uid)
+        if created:
+            info["created_time_estimate"] = created
+
+    # Phân loại tài khoản Facebook
+    if re.search(r'content="fb://page/\d+"', page, re.I):
+        info["account_type"] = "Trang / Fanpage Doanh nghiệp"
+    elif re.search(r'content="fb://group/\d+"', page, re.I):
+        info["account_type"] = "Nhóm cộng đồng Facebook"
+    else:
+        info["account_type"] = "Trang cá nhân (Personal Profile)"
+
+    title_m = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', page, re.I) or re.search(r'<title>(.*?)</title>', page, re.I)
+    img_m = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', page, re.I)
+    desc_m = re.search(r'<meta\s+(?:name|property)="(?:\w+:)?description"\s+content="([^"]+)"', page, re.I)
+
+    if title_m:
+        t = html.unescape(title_m.group(1))
+        cleaned_title = re.sub(r"\s*[|•\-]\s*Facebook.*$", "", t, flags=re.I).strip()
+        if cleaned_title and not cleaned_title.lower().startswith("log in"):
+            info["display_name"] = cleaned_title
+    if img_m:
+        info["avatar_url"] = img_m.group(1)
+    if desc_m:
+        info["about"] = html.unescape(desc_m.group(1))
+
     return info if info else None
 
 
@@ -562,19 +765,23 @@ MAIN_REPLY_KEYBOARD = {
 }
 
 
-def make_inline_result_keyboard(url: str, identifier: str) -> dict:
-    return {
-        "inline_keyboard": [
-            [
-                {"text": "🌐 Mở Profile Gốc", "url": url},
-                {"text": "🔄 Quét Lại", "callback_data": f"recheck:{url}"}
-            ],
-            [
-                {"text": "⚡ Check Acc Khác", "callback_data": "cmd:live"},
-                {"text": "📋 Quét Hàng Loạt", "callback_data": "cmd:batch"}
-            ]
+def make_inline_result_keyboard(url: str, identifier: str, platform: str = "", uid: str | None = None) -> dict:
+    rows = [
+        [
+            {"text": "🌐 Mở Profile Gốc", "url": url},
+            {"text": "🔄 Quét Lại", "callback_data": f"recheck:{url}"}
         ]
-    }
+    ]
+    # Nút nhắn tin Messenger trực tiếp nếu là Facebook và có UID
+    if platform == "facebook" and uid:
+        rows.append([
+            {"text": "💬 Nhắn Tin Messenger", "url": f"https://m.me/{uid}"}
+        ])
+    rows.append([
+        {"text": "⚡ Check Acc Khác", "callback_data": "cmd:live"},
+        {"text": "📋 Quét Hàng Loạt", "callback_data": "cmd:batch"}
+    ])
+    return {"inline_keyboard": rows}
 
 
 def format_live_badge(status: str) -> str:
@@ -633,9 +840,25 @@ def render_profile_card(platform: str, identifier: str, url: str, info: dict,
         "",
         f"👤 <b>Tên hiển thị:</b> <b>{safe_name}</b>",
         f"🏷️ <b>Username:</b> <code>@{safe_id}</code>",
-        f"⚡ <b>Trạng thái:</b> {badge}",
-        f"📶 <b>Tín hiệu máy chủ:</b> {signal_bar}",
     ]
+
+    # Hiển thị UID số nguyên gốc nếu có
+    num_id = info.get("numeric_id") or info.get("id")
+    if num_id and str(num_id).isdigit():
+        lines.append(f"🆔 <b>UID số gốc:</b> <code>{html.escape(str(num_id))}</code>")
+
+    lines.append(f"⚡ <b>Trạng thái:</b> {badge}")
+    lines.append(f"📶 <b>Tín hiệu máy chủ:</b> {signal_bar}")
+
+    # Hiển thị thời gian tạo tài khoản (ước tính phân tích UID)
+    if "created_time_estimate" in info and info["created_time_estimate"]:
+        lines.append(f"📅 <b>Thời gian tạo:</b> <code>{html.escape(str(info['created_time_estimate']))}</code> <i>(Ước tính UID)</i>")
+    elif "created_time" in info and info["created_time"]:
+        lines.append(f"📅 <b>Thời gian tạo:</b> <code>{html.escape(str(info['created_time']))}</code>")
+
+    # Phân loại tài khoản
+    if "account_type" in info and info["account_type"]:
+        lines.append(f"🏷️ <b>Phân loại:</b> {html.escape(str(info['account_type']))}")
 
     if reason:
         lines.append(f"ℹ️ <b>Ghi chú:</b> <i>{html.escape(reason)}</i>")
@@ -652,12 +875,18 @@ def render_profile_card(platform: str, identifier: str, url: str, info: dict,
         stat_rows.append(f"• 🎬 <b>Bài viết / Video:</b> <code>{format_number(info['video_count'])}</code>")
     if "fan_count" in info and info["fan_count"] is not None:
         stat_rows.append(f"• 👍 <b>Lượt thích Trang:</b> <code>{format_number(info['fan_count'])}</code>")
+    if "engagement_rate" in info and info["engagement_rate"]:
+        stat_rows.append(f"• 🔥 <b>Tỷ lệ tương tác:</b> {info['engagement_rate']}")
     if "is_verified" in info and info["is_verified"] is not None:
         ver_text = "Có ✅ (Tích xanh chính chủ)" if info["is_verified"] else "Không ❌"
         stat_rows.append(f"• 🛡️ <b>Tích xanh:</b> {ver_text}")
     if "is_private" in info and info["is_private"] is not None:
         priv_text = "Riêng tư 🔒" if info["is_private"] else "Công khai 🌐"
         stat_rows.append(f"• 🔐 <b>Quyền riêng tư:</b> {priv_text}")
+
+    website = info.get("website") or info.get("external_url")
+    if website:
+        stat_rows.append(f"• 🌐 <b>Website:</b> <a href=\"{html.escape(str(website))}\">{html.escape(str(website)[:35])}</a>")
 
     if stat_rows:
         lines.append("")
@@ -835,7 +1064,6 @@ def handle(text: str, tiktok: TikTokResearch | None, meta_token: str, meta_versi
         try:
             platform, identifier, url = parse_account(target)
             st, reason = check_live_status(platform, identifier)
-            inline_kb = make_inline_result_keyboard(url, identifier)
             info = {}
             if st == "LIVE":
                 if platform == "tiktok":
@@ -846,7 +1074,13 @@ def handle(text: str, tiktok: TikTokResearch | None, meta_token: str, meta_versi
                     pub = lookup_instagram_public(identifier)
                     if pub:
                         info.update(pub)
+                elif platform == "facebook":
+                    pub = lookup_facebook_public(identifier)
+                    if pub:
+                        info.update(pub)
 
+            uid = info.get("numeric_id") or info.get("id")
+            inline_kb = make_inline_result_keyboard(url, identifier, platform=platform, uid=uid)
             elapsed = (time.perf_counter() - start_time) if start_time else None
             card_html = render_profile_card(platform, identifier, url, info, live_status=st, reason=reason, elapsed=elapsed)
             avatar = info.get("avatar_url")
@@ -873,7 +1107,6 @@ def handle(text: str, tiktok: TikTokResearch | None, meta_token: str, meta_versi
         return ResultTuple(f"⚠️ <b>Lỗi:</b> {html.escape(str(exc))}\n\n{WELCOME_HTML}", None)
 
     live_status, reason = check_live_status(platform, identifier)
-    inline_kb = make_inline_result_keyboard(url, identifier)
 
     # 1. TIKTOK
     if platform == "tiktok":
@@ -889,6 +1122,8 @@ def handle(text: str, tiktok: TikTokResearch | None, meta_token: str, meta_versi
             except Exception:
                 pass
 
+        uid = info.get("numeric_id") or info.get("id")
+        inline_kb = make_inline_result_keyboard(url, identifier, platform="tiktok", uid=uid)
         elapsed = (time.perf_counter() - start_time) if start_time else None
         card = render_profile_card(platform, identifier, url, info, live_status=live_status, reason=reason or "Hồ sơ TikTok", elapsed=elapsed)
         avatar = info.get("avatar_url")
@@ -898,6 +1133,7 @@ def handle(text: str, tiktok: TikTokResearch | None, meta_token: str, meta_versi
     elif platform == "instagram":
         elapsed = (time.perf_counter() - start_time) if start_time else None
         if live_status == "DIE":
+            inline_kb = make_inline_result_keyboard(url, identifier, platform="instagram")
             card = render_profile_card(platform, identifier, url, {}, live_status="DIE", reason=reason or "Tài khoản không tồn tại hoặc đã bị khóa/xóa.", elapsed=elapsed)
             return ResultTuple(card, inline_kb, avatar_url=None)
 
@@ -912,6 +1148,8 @@ def handle(text: str, tiktok: TikTokResearch | None, meta_token: str, meta_versi
         except Exception:
             pass
 
+        uid = info.get("numeric_id") or info.get("id")
+        inline_kb = make_inline_result_keyboard(url, identifier, platform="instagram", uid=uid)
         card = render_profile_card(platform, identifier, url, info, live_status="LIVE", reason=reason or "Hồ sơ Instagram đang hoạt động", elapsed=elapsed)
         avatar = info.get("avatar_url")
         return ResultTuple(card, inline_kb, avatar_url=avatar)
@@ -919,16 +1157,26 @@ def handle(text: str, tiktok: TikTokResearch | None, meta_token: str, meta_versi
     # 3. FACEBOOK
     elif platform == "facebook":
         info = {}
+        pub_info = lookup_facebook_public(identifier)
+        if pub_info:
+            info.update(pub_info)
+
         if meta_token and live_status != "DIE":
             try:
-                info = lookup_facebook(identifier, meta_token, meta_version)
+                api_info = lookup_facebook(identifier, meta_token, meta_version)
+                if api_info:
+                    info.update(api_info)
             except Exception:
                 pass
+
+        uid = info.get("numeric_id") or info.get("id") or (identifier if identifier.isdigit() else None)
+        inline_kb = make_inline_result_keyboard(url, identifier, platform="facebook", uid=uid)
         elapsed = (time.perf_counter() - start_time) if start_time else None
         card = render_profile_card(platform, identifier, url, info, live_status=live_status, reason=reason or "Trang/Hồ sơ Facebook", elapsed=elapsed)
         avatar = info.get("avatar_url") or ((info.get("picture") or {}).get("data") or {}).get("url")
         return ResultTuple(card, inline_kb, avatar_url=avatar)
 
+    inline_kb = make_inline_result_keyboard(url, identifier, platform=platform)
     elapsed = (time.perf_counter() - start_time) if start_time else None
     card = render_profile_card(platform, identifier, url, {}, live_status=live_status, reason=reason, elapsed=elapsed)
     return ResultTuple(card, inline_kb, avatar_url=None)
