@@ -1,16 +1,24 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const login = require('@dongdev/fca-unofficial');
+const { loginAsync } = require('@dongdev/fca-unofficial');
 const { Store } = require('./store');
 const { createBot } = require('./bot');
 
 const http = require('node:http');
+const health = { state: 'starting', updatedAt: new Date().toISOString() };
+
+function setHealth(state) {
+  health.state = state;
+  health.updatedAt = new Date().toISOString();
+}
 
 if (process.env.PORT) {
   const port = parseInt(process.env.PORT, 10) || 8080;
   const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Messenger Group Bot is LIVE & running!\n');
+    const ready = health.state === 'connected';
+    const status = req.url === '/health' ? 200 : (ready ? 200 : 503);
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ...health, messengerConnected: ready }));
   });
   server.listen(port, '0.0.0.0', () => {
     console.log(`[HealthCheck] Web server đang lắng nghe cổng ${port}`);
@@ -55,27 +63,55 @@ if (!Array.isArray(appState)) {
   process.exit(1);
 }
 
-login({ appState }, { listenEvents: true, selfListen: false }, (error, api) => {
-  if (error) {
-    console.error('Đăng nhập Messenger thất bại:', error);
-    process.exitCode = 1;
-    return;
-  }
-  api.setOptions({ listenEvents: true, selfListen: false });
-  const bot = createBot(api, new Store(dataPath));
-  let queue = Promise.resolve();
-  api.listenMqtt((listenError, event) => {
-    if (listenError) {
-      console.error('Lỗi kết nối Messenger:', listenError);
-      return;
-    }
-    queue = queue.then(() => bot.handle(event)).catch(err => console.error('Lỗi xử lý sự kiện:', err));
-  });
-  const runBirthdays = () => {
-    queue = queue.then(() => bot.checkBirthdays()).catch(err => console.error('Lỗi chúc mừng sinh nhật:', err));
-  };
-  runBirthdays();
-  const birthdayTimer = setInterval(runBirthdays, 5 * 60 * 1000);
-  birthdayTimer.unref?.();
-  console.log('Bot đang theo dõi các nhóm Messenger của tài khoản này.');
+process.on('uncaughtException', (err) => {
+  console.error('[UncaughtException]:', err);
+  process.exit(1);
 });
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[UnhandledRejection]:', reason);
+  setHealth('error');
+});
+
+function startBot() {
+  setHealth('logging_in');
+  loginAsync({ appState }, { listenEvents: true, selfListen: false, autoReconnect: true, emitReady: true }).then(ctx => {
+    const api = ctx.api;
+    setHealth('connecting');
+    api.setOptions({ listenEvents: true, selfListen: false, autoReconnect: true, emitReady: true });
+    const bot = createBot(api, new Store(dataPath));
+    let queue = Promise.resolve();
+    api.listenMqtt((listenError, event) => {
+      // Some versions of the unofficial library deliver its ready signal as
+      // the first callback argument; accept either position.
+      if (listenError?.type === 'ready' || event?.type === 'ready') {
+        setHealth('connected');
+        return;
+      }
+      if (listenError) {
+        setHealth('disconnected');
+        console.error('Lỗi kết nối Messenger MQTT:', listenError);
+        return;
+      }
+      if (!event) return;
+      setHealth('connected');
+      queue = queue.then(() => bot.handle(event)).catch(err => console.error('Lỗi xử lý sự kiện:', err));
+    });
+    const runBirthdays = () => {
+      queue = queue.then(() => bot.checkBirthdays()).catch(err => console.error('Lỗi chúc mừng sinh nhật:', err));
+    };
+    runBirthdays();
+    const birthdayTimer = setInterval(runBirthdays, 5 * 60 * 1000);
+    birthdayTimer.unref?.();
+    const connectionTimer = setInterval(() => {
+      if (health.state === 'connected' && !ctx.mqttClient?.connected) setHealth('disconnected');
+    }, 5000);
+    connectionTimer.unref?.();
+    console.log('Bot đang theo dõi các nhóm Messenger của tài khoản này.');
+  }).catch(error => {
+    setHealth('login_failed');
+    console.error('Đăng nhập Messenger thất bại. Đã dừng thử lại để tránh đăng nhập liên tục:', error);
+  });
+}
+
+startBot();

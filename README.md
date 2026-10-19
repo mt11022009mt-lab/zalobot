@@ -42,3 +42,13 @@ Bot tự chúc sinh nhật từ 08:00 giờ Việt Nam khi đang chạy; nếu k
 Thư viện đăng nhập Messenger này **không phải API chính thức của Meta**. Facebook có thể đổi cách đăng nhập, sự kiện nhóm hoặc quyền kick, nên bot có thể ngừng hoạt động và cần cập nhật thư viện. Các cuộc trò chuyện mã hóa đầu cuối có thể không phát đủ sự kiện cho thư viện. Không thể chạy thật trước khi có `appState` của tài khoản bot; không ghi mật khẩu Facebook vào mã nguồn.
 
 Phiên bản `4.0.3` của thư viện hiện kéo theo các cảnh báo `npm audit` từ `sqlite3` và các gói con. Không dùng bot với tài khoản chính hoặc trên máy chứa dữ liệu nhạy cảm; cập nhật thư viện khi tác giả phát hành bản vá. Việc cài đặt có thể cần cho phép script cài đặt `sqlite3` nếu môi trường npm chặn script này.
+
+## Kiểm tra bot trên Render
+
+- Build command: `npm ci`; start command: `npm start` (hoặc `node index.js`).
+- Đặt `APPSTATE_JSON` hoặc `APPSTATE_BASE64` trong **Environment** của Render. Đây là cookie đăng nhập, không đưa vào Git hoặc gửi vào chat/log. Nếu không có biến này, bot không thể đăng nhập vì `appstate.json` được loại khỏi Git.
+- Mở URL dịch vụ: JSON `state: connected` và `messengerConnected: true` mới xác nhận kênh Messenger hoạt động. `login_failed` nghĩa là cần kiểm tra phiên/cookie; `disconnected` nghĩa là MQTT mất kết nối. `/health` chỉ kiểm tra web process.
+- Trong Render → Settings → Health Checks, đặt path `/health` để theo dõi web process. Kiểm tra `/ready` riêng khi cần biết Messenger đã kết nối chưa (HTTP 503 nếu chưa). Không dùng `/ready` làm health check tự khởi động lại khi cookie hết hạn, vì Render có thể lặp đăng nhập; thay cookie rồi redeploy thủ công.
+- Xem Render → Logs để phân biệt lỗi build, thiếu cookie, phiên hết hạn, và lỗi MQTT. Deploy thành công chỉ cho biết web service đã triển khai.
+- Nếu dùng gói Free, web service có thể ngủ khi không có lưu lượng truy cập. Bot cần gói luôn chạy hoặc một background worker phù hợp. Nếu cần lưu thống kê qua lần redeploy, đặt `DATA_PATH` trên persistent disk.
+- Log `Login successful!` chỉ xác nhận cookie. Nếu sau đó liên tục có `mqtt t_ms timeout` và `mqtt connection closed`, kênh nhận tin Messenger chưa đồng bộ; `/ready` sẽ báo 503. Kiểm tra lại tài khoản trong trình duyệt và log mới nhất, rồi thử redeploy một lần. Nếu vòng lặp vẫn còn, nguyên nhân nằm ở phiên realtime/thư viện hoặc kết nối đến Meta; thay gói Render không tự sửa được lỗi MQTT.
