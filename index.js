@@ -565,25 +565,42 @@ async function startBot() {
         const newMembers = event.data?.updateMembers || [];
         const groupName = event.data?.groupName || 'nhóm';
 
-        let targetName = 'Thành viên mới';
+        // Lấy danh sách ID thành viên mới (có thể nằm ở updateMembers hoặc sourceId)
         let targetId = '';
+        let targetName = '';
 
         if (Array.isArray(newMembers) && newMembers.length > 0) {
           const m = newMembers[0];
-          targetId = typeof m === 'object' ? String(m.id) : String(m);
-          targetName = typeof m === 'object' ? (m.dName || 'Thành viên mới') : 'Thành viên mới';
+          targetId = typeof m === 'object' ? String(m.id || '') : String(m);
+          targetName = typeof m === 'object' ? (m.dName || '') : '';
+        }
 
-          if (targetName === 'Thành viên mới' && targetId) {
-            try {
-              const memInfo = await api.getGroupMembersInfo(targetId);
-              if (memInfo?.profiles?.[targetId]?.displayName) {
-                targetName = memInfo.profiles[targetId].displayName;
-              }
-            } catch (e) {}
+        // Nếu updateMembers không có, lấy từ sourceId hoặc actorId (người vừa bấm join vào)
+        if (!targetId && event.data?.sourceId) {
+          targetId = String(event.data.sourceId);
+        }
+
+        // Tra cứu tên thật từ API getGroupMembersInfo của Zalo
+        if (targetId) {
+          try {
+            const memInfo = await api.getGroupMembersInfo(targetId);
+            const profile = memInfo?.profiles?.[targetId] || memInfo?.profiles?.[`${targetId}_0`];
+            if (profile?.displayName) {
+              targetName = profile.displayName;
+            } else if (profile?.zaloName) {
+              targetName = profile.zaloName;
+            }
+          } catch (e) {
+            console.warn('⚠️ Không thể tra cứu profile thành viên:', e.message);
           }
         }
 
-        console.log(`👋 [Thành viên mới] Chuẩn bị gửi ảnh chào mừng cho @${targetName}!`);
+        // Nếu vẫn không tra được tên, dùng fallback ngắn gọn
+        if (!targetName) {
+          targetName = 'Bạn';
+        }
+
+        console.log(`👋 [Thành viên mới] Chuẩn bị gửi ảnh chào mừng cho @${targetName} (UID: ${targetId})!`);
 
         const bannerBuf = createWelcomeBannerImage(targetName, groupName);
         const welcomeText = formatWelcomeCard(targetName, groupName);
@@ -603,9 +620,9 @@ async function startBot() {
                 }
               }
             ],
-            mentions: targetId ? [
+            mentions: (targetId && mentionPos >= 0) ? [
               {
-                pos: mentionPos >= 0 ? mentionPos : 0,
+                pos: mentionPos,
                 len: targetName.length + 1,
                 uid: targetId
               }
