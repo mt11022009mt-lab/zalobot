@@ -55,15 +55,17 @@ function funScore(threadID, userID, day) {
 }
 
 function scoreBar(score, width = 10) {
-  const filled = Math.round(score / 100 * width);
-  return '█'.repeat(filled) + '░'.repeat(width - filled);
+  const clamped = Math.max(0, Math.min(100, Math.round(Number(score) || 0)));
+  const filled = Math.max(0, Math.min(width, Math.round(clamped / 100 * width)));
+  return '●'.repeat(filled) + '○'.repeat(width - filled);
 }
 
 function createBot(api, store, options = {}) {
   const botID = String(api.getCurrentUserID());
   const rawSend = options.send || ((text, threadID) => api.sendMessage(text, threadID));
   const send = (msg, threadID, imageKey) => {
-    if (typeof msg === 'string' && imageKey && !options.send) {
+    if (options.send) return options.send(msg, threadID, imageKey);
+    if (typeof msg === 'string' && imageKey) {
       const imgPath = path.join(__dirname, '..', 'assets', `${imageKey}.png`);
       if (fs.existsSync(imgPath)) {
         return rawSend({ body: msg, attachment: fs.createReadStream(imgPath) }, threadID);
@@ -74,7 +76,7 @@ function createBot(api, store, options = {}) {
   const info = options.getThreadInfo || (threadID => api.getThreadInfo(threadID));
   const remove = options.removeUserFromGroup || ((userID, threadID) => api.removeUserFromGroup(userID, threadID));
   const now = options.now || (() => Date.now());
-  const features = createFeatures({ botID, store, send, info, now, dayKey, daysAgo });
+  const features = createFeatures({ botID, store, send, info, now, dayKey, daysAgo, scoreBar });
 
   async function groupInfo(threadID, added = []) {
     const details = await info(threadID);
@@ -97,7 +99,6 @@ function createBot(api, store, options = {}) {
     const { details, group } = found;
     const all = new Set(group.members);
     const memberNames = new Map((details.userInfo || []).map(u => [String(u.id), memberName(u, u.id)]));
-    // The current thread list reflects the members after this join event.
     const currentTotal = new Set((details.participantIDs || []).map(String)).size;
     const fresh = [...new Set(added.map(memberID))].filter(id => id && !all.has(id));
     for (const [index, id] of fresh.entries()) {
@@ -112,11 +113,12 @@ function createBot(api, store, options = {}) {
           ? currentTotal - fresh.length + index + 1
           : all.size;
         await send(
-          `╭─ 👋 CHÀO MỪNG ─╮\n` +
-          `│ Thành viên mới  │\n` +
-          `╰────────────────╯\n\n` +
-          `Chào mừng ${name} đến với nhóm! Bạn là thành viên thứ ${ordinal}. ✨\n` +
-          `Chúc bạn có những trải nghiệm thật vui vẻ cùng mọi người nha! 🥳`,
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `▏◈ CHÀO MỪNG THÀNH VIÊN MỚI\n` +
+          `▏Chào mừng ${name} đến với nhóm! Bạn là thành viên thứ ${ordinal} của đại gia đình. ✨\n` +
+          `▏Chúc bạn có những trải nghiệm thật vui vẻ cùng mọi người nha!\n` +
+          `▏Gõ !help để khám phá trung tâm lệnh bot.\n` +
+          `━━━━━━━━━━━━━━━━━━━━`,
           event.threadID,
           'welcome'
         );
@@ -138,12 +140,17 @@ function createBot(api, store, options = {}) {
     if (!id || id === botID) return false;
     const messageID = event.messageID && String(event.messageID);
     if (messageID && group.recentIDs.includes(messageID)) return false;
-    if (messageID) group.recentIDs = [...group.recentIDs.slice(-4999), messageID];
-    const day = dayKey(now());
-    group.days[day] ||= {};
-    group.days[day][id] = (group.days[day][id] || 0) + 1;
-    const cutoff = daysAgo(89, now());
-    for (const oldDay of Object.keys(group.days)) if (oldDay < cutoff) delete group.days[oldDay];
+    if (messageID) {
+      group.recentIDs.push(messageID);
+      if (group.recentIDs.length > 500) group.recentIDs.shift();
+    }
+    const today = dayKey(now());
+    const dayBucket = (group.days[today] ||= {});
+    dayBucket[id] = (dayBucket[id] || 0) + 1;
+    const cutoff = daysAgo(29, now());
+    for (const oldDay of Object.keys(group.days)) {
+      if (oldDay < cutoff) delete group.days[oldDay];
+    }
     store.save();
     return true;
   }
@@ -169,11 +176,14 @@ function createBot(api, store, options = {}) {
       group.members = group.members.filter(id => id !== target);
       store.save();
       return send(
-        `╭─ 🚪 THÔNG BÁO ─╮\n` +
-        `│ Xóa thành viên\n` +
-        `╰───────────────╯\n\n` +
-        `✅ Đã mời ${group.names[target] || target} ra khỏi nhóm.`,
-        threadID
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏◈ THÔNG BÁO XỬ LÝ KỶ LUẬT\n` +
+        `▏✅ Đã mời thành viên ra khỏi nhóm:\n` +
+        `▏👤 ${group.names[target] || target}\n` +
+        `▏🛡️ Người thực thi: ${group.names[actor] || actor}\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
+        threadID,
+        'warning'
       );
     } catch (error) {
       console.error('Kick failed:', error);
@@ -189,41 +199,87 @@ function createBot(api, store, options = {}) {
     store.save();
     const rows = members.map(id => ({ id, ...countFor(group, id, period, now()) }));
     const label = id => group.names[id] || id;
+
     if (command === '!imlang') {
       const quiet = rows.filter(row => row.count === 0);
-      const lines = quiet.slice(0, 15).map((row, i) => `  ${i + 1}. ${label(row.id)}`);
+      const lines = quiet.slice(0, 15).map((row, i) => `▏  ${i + 1}. ${label(row.id)}`);
       return send(
-        `╭─ 🔕 THÀNH VIÊN ÍT NHẮN ─╮\n` +
-        `│ ${period} ngày qua chưa gửi tin\n` +
-        `╰─────────────────────────╯\n\n` +
-        `📊 Tỉ lệ: ${quiet.length}/${members.length} thành viên chưa nhắn tin trong ${period} ngày\n` +
-        `────────────\n` +
-        `${lines.length ? lines.join('\n') : '  ✨ Toàn bộ thành viên đều đã hoạt động!'}` +
-        `${quiet.length > 15 ? '\n  … và còn ' + (quiet.length - 15) + ' người khác' : ''}`,
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏◈ THÀNH VIÊN ÍT NHẮN · ${period} NGÀY\n` +
+        `▏Chưa gửi tin nhắn nào trong ${period} ngày qua:\n` +
+        `▏📊 Tỉ lệ: ${quiet.length}/${members.length} thành viên\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `${lines.length ? lines.join('\n') : '▏  ✨ Toàn bộ thành viên đều đã hoạt động!'}` +
+        `${quiet.length > 15 ? '\n▏  … và còn ' + (quiet.length - 15) + ' người khác' : ''}\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
         event.threadID,
-        'rank'
+        'cleanup'
       );
     }
+
+    if (command === '!thongke' || command === '!stats') {
+      const total = rows.reduce((sum, row) => sum + row.count, 0);
+      const active = rows.filter(row => row.count > 0).length;
+      const rate = members.length ? Math.round(active / members.length * 100) : 0;
+      rows.sort((a, b) => b.count - a.count || a.id.localeCompare(b.id));
+      const top1 = rows[0]?.count > 0 ? `${label(rows[0].id)} (${rows[0].count} tin)` : 'Chưa có';
+      return send(
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏◈ SỨC KHỎE NHÓM · ${period} NGÀY\n` +
+        `▏💬 Tổng tin nhắn: ${total} tin\n` +
+        `▏👥 Quy mô nhóm: ${members.length} thành viên\n` +
+        `▏🔥 Đang hoạt động: ${active} người (${rate}%)\n` +
+        `▏Tiến trình active: ${scoreBar(rate, 10)} ${rate}%\n` +
+        `▏🏆 Quán quân tương tác: ${top1}\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏💡 Dữ liệu được tính tự động từ nhật ký bot.\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
+        event.threadID,
+        'stats'
+      );
+    }
+
     rows.sort((a, b) => b.count - a.count || a.id.localeCompare(b.id));
     const total = rows.reduce((sum, row) => sum + row.count, 0);
     const active = rows.filter(row => row.count > 0).length;
+    const rate = members.length ? Math.round(active / members.length * 100) : 0;
     const lines = rows.filter(row => row.count > 0).slice(0, 10)
       .map((row, i) => {
-        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : ` ${i + 1}.`;
-        return `${medal} ${label(row.id)}: ${row.count} tin (${(row.count / period).toFixed(1)}/ngày), ${row.activeDays} ngày hoạt động`;
+        const medal = i === 0 ? '🥇 1.' : i === 1 ? '🥈 2.' : i === 2 ? '🥉 3.' : `   ${i + 1}.`;
+        return `▏${medal} ${label(row.id)}: ${row.count} tin (${(row.count / period).toFixed(1)}/ngày), ${row.activeDays} ngày`;
       });
     return send(
-      `╭─ 📊 BẢNG XẾP HẠNG HOẠT ĐỘNG ─╮\n` +
-      `│ Thống kê ${period} ngày (giờ VN)\n` +
-      `╰──────────────────────────────╯\n\n` +
-      `💬 Tổng số: ${total} tin nhắn\n` +
-      `👥 Thành viên: ${active}/${members.length} thành viên có hoạt động\n` +
-      `────────────\n` +
-      `${lines.length ? lines.join('\n') : 'Chưa có tin nhắn được ghi nhận.'}\n` +
-      `────────────\n` +
-      `💡 Dữ liệu bắt đầu từ khi bot chạy.`,
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `▏◈ BẢNG VÀNG HOẠT ĐỘNG · ${period} NGÀY\n` +
+      `▏💬 Tổng số: ${total} tin nhắn\n` +
+      `▏👥 Thành viên: ${active}/${members.length} có hoạt động\n` +
+      `▏Tỷ lệ hoạt động: ${scoreBar(rate, 10)} ${rate}%\n` +
+      `▏━━━━━━━━━━━━━━━━━━━\n` +
+      `${lines.length ? lines.join('\n') : '▏Chưa có tin nhắn được ghi nhận.'}\n` +
+      `▏━━━━━━━━━━━━━━━━━━━\n` +
+      `▏💡 Gõ !thongke để xem báo cáo sức khỏe nhóm.\n` +
+      `━━━━━━━━━━━━━━━━━━━━`,
       event.threadID,
       'rank'
+    );
+  }
+
+  async function handleAdminList(event, details, group) {
+    const threadID = String(event.threadID);
+    const admins = [...adminSet(details)];
+    const names = new Map((details.userInfo || []).map(u => [String(u.id), memberName(u, u.id)]));
+    const adminNames = admins.map(id => names.get(id) || group.names[id] || id);
+    return send(
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `▏◈ BAN QUẢN TRỊ NHÓM\n` +
+      `▏Danh sách Quản trị viên hiện tại:\n` +
+      `${adminNames.map((name, i) => `▏🛡️ ${i + 1}. ${name}`).join('\n') || '▏Chưa có QTV'}\n` +
+      `▏━━━━━━━━━━━━━━━━━━━\n` +
+      `▏Tổng cộng: ${adminNames.length} QTV đang hỗ trợ nhóm.\n` +
+      `▏Cần hỗ trợ? Hãy tag hoặc nhắc tên QTV trong nhóm nhé!\n` +
+      `━━━━━━━━━━━━━━━━━━━━`,
+      threadID,
+      'admin'
     );
   }
 
@@ -241,18 +297,20 @@ function createBot(api, store, options = {}) {
     if (command === '!bangdogay' || command === '!topgay') {
       const rows = members.map(id => ({ id, score: funScore(threadID, id, today) }))
         .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-      const medals = ['🥇', '🥈', '🥉'];
+      const medals = ['🥇 1.', '🥈 2.', '🥉 3.'];
       const lines = rows.slice(0, 10).map((row, index) =>
-        `${medals[index] || ` ${index + 1}.`} ${label(row.id)}\n   ${scoreBar(row.score, 8)} ${row.score}%`);
+        `▏${medals[index] || `   ${index + 1}.`} ${label(row.id)}\n▏   ${scoreBar(row.score, 8)} ${row.score}%`);
       return send(
-        `╭─ 🌈 BẢNG ĐỘ GAY HÔM NAY ─╮\n` +
-        `│ ${displayDate} · ${members.length} thành viên\n` +
-        `╰─────────────────────────╯\n\n` +
-        `${lines.join('\n') || 'Chưa có thành viên để xếp hạng.'}\n` +
-        `────────────\n` +
-        `${footer}`,
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏◈ BẢNG ĐỘ GAY HÔM NAY\n` +
+        `▏Ngày: ${displayDate} · ${members.length} thành viên\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `${lines.join('\n') || '▏Chưa có thành viên để xếp hạng.'}\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏${footer}\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
         threadID,
-        'ship'
+        'fun'
       );
     }
 
@@ -265,18 +323,17 @@ function createBot(api, store, options = {}) {
       .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
       .findIndex(row => row.id === target) + 1;
     return send(
-      `╭─ 🌈 ĐỘ GAY HÔM NAY ─╮\n` +
-      `│ Ngày ${displayDate}\n` +
-      `╰─────────────────────╯\n\n` +
-      `👤 Đối tượng: ${label(target)}\n` +
-      `📊 Chỉ số: ${score}%\n` +
-      `   ${scoreBar(score, 10)}\n` +
-      `🏅 Xếp hạng: Hạng ${rank}/${members.length} trong nhóm\n` +
-      `────────────\n` +
-      `${footer}\n` +
-      `💡 Gõ !bangdogay để xem bảng xếp hạng.`,
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `▏◈ MÁY ĐO ĐỘ QUẬY · ${displayDate}\n` +
+      `▏👤 Đối tượng: ${label(target)}\n` +
+      `▏Chỉ số quậy: ${scoreBar(score, 10)} ${score}%\n` +
+      `▏🏅 Xếp hạng: Hạng ${rank}/${members.length} trong nhóm\n` +
+      `▏━━━━━━━━━━━━━━━━━━━\n` +
+      `▏${footer}\n` +
+      `▏💡 Gõ !bangdogay để xem bảng xếp hạng hôm nay.\n` +
+      `━━━━━━━━━━━━━━━━━━━━`,
       threadID,
-      'ship'
+      'fun'
     );
   }
 
@@ -291,7 +348,7 @@ function createBot(api, store, options = {}) {
     if (event.type !== 'message' && event.type !== 'message_reply') return;
     if (String(event.senderID) === botID) return;
     const body = String(event.body || '').trim();
-    const match = /^!(hoatdong|top|imlang|kick|help|dogay|bangdogay|topgay|profile|diemdanh|bangdiemdanh|bangtuongtac|sinhnhat|binhchon|vote|ketqua|dongbinhchon|canhbao|ship)(?:\s+(.*))?$/i.exec(body);
+    const match = /^!(hoatdong|top|rank|thongke|stats|imlang|kick|help|dogay|bangdogay|topgay|profile|hoso|diemdanh|bangdiemdanh|bangtuongtac|sinhnhat|binhchon|vote|ketqua|dongbinhchon|canhbao|ship|ghepdoi|qtv|admin)(?:\s+(.*))?$/i.exec(body);
     let group = store.data.groups[String(event.threadID)] ? store.group(event.threadID) : null;
     if (!group?.initialized) {
       const found = await groupInfo(event.threadID);
@@ -301,57 +358,49 @@ function createBot(api, store, options = {}) {
     if (trackMessage(group, event)) features.trackInteractions(group, event);
     if (!match) return;
     const command = `!${match[1].toLowerCase()}`;
+
     if (command === '!help') {
       return send(
-        `╭━━━━━━━━━━━━━━━━━━━━╮\n` +
-        `    🤖 MENU TRỢ LÝ NHÓM\n` +
-        `    Phiên bản tương tác tự động\n` +
-        `╰━━━━━━━━━━━━━━━━━━━━╯\n\n` +
-        `📊 THỐNG KÊ & TƯƠNG TÁC\n\n` +
-        `▫️ !profile\n` +
-        `   ↳ Xem cấp độ, streak & thông số cá nhân\n\n` +
-        `▫️ !hoatdong [7 | 30]  (hoặc !top)\n` +
-        `   ↳ Bảng xếp hạng thành viên chăm chat\n\n` +
-        `▫️ !imlang [7 | 30]\n` +
-        `   ↳ Danh sách thành viên ít tương tác\n\n` +
-        `▫️ !diemdanh\n` +
-        `   ↳ Điểm danh nhận streak hàng ngày\n\n` +
-        `▫️ !bangdiemdanh\n` +
-        `   ↳ Bảng vàng điểm danh chuyên cần\n\n` +
-        `▫️ !bangtuongtac\n` +
-        `   ↳ Top cặp đôi tương tác nhiều nhất 30 ngày\n\n` +
-        `⚙️ TIỆN ÍCH & BÌNH CHỌN\n\n` +
-        `▫️ !sinhnhat DD/MM\n` +
-        `   ↳ Lưu ngày sinh (chúc mừng tự động lúc 08:00)\n\n` +
-        `▫️ !binhchon [Hỏi | PA 1 | PA 2]\n` +
-        `   ↳ Tạo cuộc bỏ phiếu nhóm nhanh\n\n` +
-        `▫️ !vote [số]  •  !ketqua\n` +
-        `   ↳ Bỏ phiếu hoặc xem kết quả trực tiếp\n\n` +
-        `▫️ !dongbinhchon\n` +
-        `   ↳ Đóng và chốt kết quả bình chọn\n\n` +
-        `🎉 GIẢI TRÍ & KẾT NỐI\n\n` +
-        `▫️ !ship\n` +
-        `   ↳ Ghép đôi ngẫu nhiên 2 thành viên\n\n` +
-        `▫️ !dogay  •  !bangdogay (topgay)\n` +
-        `   ↳ Máy đo & BXH độ vui tính hôm nay\n\n` +
-        `🛡️ DÀNH CHO QUẢN TRỊ VIÊN\n\n` +
-        `▫️ !canhbao [tag / reply / ID] [lý do]\n` +
-        `   ↳ Nhắc nhở thành viên vi phạm\n\n` +
-        `▫️ !canhbao xem [ID]\n` +
-        `   ↳ Tra cứu lịch sử cảnh cáo\n\n` +
-        `▫️ !kick [tag / reply / ID]\n` +
-        `   ↳ Mời thành viên ra khỏi nhóm\n\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `💡 Mẹo: Có thể reply tin nhắn hoặc tag tên để thực hiện lệnh nhanh!`,
+        `▏◈ TRUNG TÂM LỆNH BOT\n` +
+        `▏Trợ lý tương tác & quản lý nhóm thông minh\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏👤 CÁ NHÂN:\n` +
+        `▏  • !hoso (!profile): Thẻ định danh & cấp bậc\n` +
+        `▏  • !diemdanh: Giữ lửa streak hàng ngày\n` +
+        `▏  • !sinhnhat [DD/MM]: Chúc mừng sinh nhật tự động\n` +
+        `▏\n` +
+        `▏👥 NHÓM & THỐNG KÊ:\n` +
+        `▏  • !rank (!hoatdong/top) [7|30]: Bảng vàng chat\n` +
+        `▏  • !thongke (!stats): Sức khỏe & tỷ lệ active\n` +
+        `▏  • !imlang [7|30]: Danh sách ít tương tác\n` +
+        `▏  • !bangdiemdanh: BXH chuyên cần\n` +
+        `▏  • !bangtuongtac: Cặp đôi tương tác nhiều nhất\n` +
+        `▏  • !qtv (!admin): Danh sách ban quản trị\n` +
+        `▏\n` +
+        `▏🎉 GIẢI TRÍ & KẾT NỐI:\n` +
+        `▏  • !ghepdoi (!ship): Bói độ hợp cạ ngẫu nhiên\n` +
+        `▏  • !dogay (!bangdogay): Máy đo độ quậy hôm nay\n` +
+        `▏  • !binhchon [Câu hỏi | PA 1 | PA 2]: Thăm dò ý kiến\n` +
+        `▏  • !vote [số]  •  !ketqua  •  !dongbinhchon\n` +
+        `▏\n` +
+        `▏🛡️ QUẢN TRỊ VIÊN:\n` +
+        `▏  • !canhbao [tag/reply/ID] [lý do]: Nhắc nhở vi phạm\n` +
+        `▏  • !kick [tag/reply/ID]: Mời ra khỏi nhóm\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏💡 Mẹo: Tag tên hoặc reply tin nhắn để thao tác nhanh!`,
         event.threadID,
         'help'
       );
     }
+
     if (command === '!kick') return handleKick(event, await info(event.threadID));
+    if (command === '!qtv' || command === '!admin') return handleAdminList(event, await info(event.threadID), group);
     if (['!dogay', '!bangdogay', '!topgay'].includes(command))
       return handleFunScore(command, event, await info(event.threadID), group);
-    if (!['!hoatdong', '!top', '!imlang'].includes(command))
+    if (!['!hoatdong', '!top', '!rank', '!imlang', '!thongke', '!stats'].includes(command))
       return features.handleCommand(command, event, store.group(event.threadID), await info(event.threadID));
+    
     const periodText = String(match[2] || '7').trim();
     if (!['7', '30'].includes(periodText)) return send('Chọn 7 hoặc 30 ngày, ví dụ: !hoatdong 30', event.threadID);
     return handleStats(command, event, await info(event.threadID), group, Number(periodText));
@@ -361,4 +410,3 @@ function createBot(api, store, options = {}) {
 }
 
 module.exports = { createBot, countFor, dayKey, funScore, memberID };
-

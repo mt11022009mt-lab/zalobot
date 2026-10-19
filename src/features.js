@@ -21,7 +21,13 @@ function birthdayDate(raw) {
   return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}`;
 }
 
-function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
+function createFeatures({ botID, store, send, info, now, dayKey, daysAgo, scoreBar }) {
+  const renderBar = scoreBar || ((score, width = 10) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(Number(score) || 0)));
+    const filled = Math.max(0, Math.min(width, Math.round(clamped / 100 * width)));
+    return '●'.repeat(filled) + '○'.repeat(width - filled);
+  });
+
   function label(group, details, id) {
     const person = (details?.userInfo || []).find(user => String(user.id) === id);
     if (person?.name) group.names[id] = safe(person.name);
@@ -79,17 +85,18 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
     const total = counts.reduce((sum, count) => sum + count, 0);
     const lines = poll.options.map((option, index) => {
       const percent = total ? Math.round(counts[index] / total * 100) : 0;
-      const blocks = Math.round(percent / 10);
-      return `${VOTE_EMOJI[index]} ${option}\n   ${'▰'.repeat(blocks)}${'▱'.repeat(10 - blocks)} ${counts[index]} phiếu (${percent}%)`;
+      return `▏${VOTE_EMOJI[index]} ${option}\n▏   ${renderBar(percent, 10)} ${counts[index]} phiếu (${percent}%)`;
     });
     return (
-      `╭─ 📊 KẾT QUẢ BÌNH CHỌN ─╮\n` +
-      `│ ${poll.question}\n` +
-      `╰────────────────────────╯\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `▏◈ KẾT QUẢ BÌNH CHỌN\n` +
+      `▏Câu hỏi: ${poll.question}\n` +
+      `▏━━━━━━━━━━━━━━━━━━━\n` +
       `${lines.join('\n')}\n` +
-      `────────────\n` +
-      `📈 Tổng cộng: ${total} phiếu bình chọn\n` +
-      `${poll.active ? '👉 React emoji vào tin nhắn để đổi phiếu.' : '🔒 Cuộc bình chọn đã kết thúc.'}`
+      `▏━━━━━━━━━━━━━━━━━━━\n` +
+      `▏📈 Tổng cộng: ${total} lượt bình chọn\n` +
+      `▏${poll.active ? '👉 React emoji vào tin nhắn để đổi phiếu.' : '🔒 Cuộc bình chọn đã kết thúc.'}\n` +
+      `━━━━━━━━━━━━━━━━━━━━`
     );
   }
 
@@ -100,7 +107,7 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
     const currentMembers = members(group, details);
     const name = id => label(group, details, id);
 
-    if (command === '!profile') {
+    if (command === '!profile' || command === '!hoso') {
       const target = targetOf(event, raw, actor);
       if (!currentMembers.includes(target)) return send('Người này hiện không có trong nhóm.', threadID);
       const start = daysAgo(29, now());
@@ -110,19 +117,22 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
       const ranking = currentMembers.sort((a, b) => count(b) - count(a) || a.localeCompare(b));
       const checkin = group.checkins[target] || { streak: 0, total: 0 };
       const rankNum = ranking.indexOf(target) + 1;
-      const rankBadge = rankNum === 1 ? '👑 Top 1' : rankNum <= 3 ? '🥈 Top 3' : `Top ${rankNum}`;
+      const rankBadge = rankNum === 1 ? '👑 Top 1 Quán Quân' : rankNum <= 3 ? '🥈 Top 3 Năng Nổ' : `Hạng #${rankNum}`;
+      const streakProgress = Math.min(100, Math.round(((checkin.streak % 10) || (checkin.streak ? 10 : 0)) * 10));
+
       return send(
-        `╭─ 👤 HỒ SƠ THÀNH VIÊN ─╮\n` +
-        `│ ✨ ${name(target)}\n` +
-        `╰───────────────────────╯\n\n` +
-        `🏅 Hạng hoạt động: ${rankNum}/${ranking.length} (${rankBadge})\n` +
-        `💬 Tin nhắn 30 ngày: ${count(target)} tin\n` +
-        `📅 Điểm danh: ${checkin.total} ngày · chuỗi ${checkin.streak} ngày\n` +
-        `🎂 Sinh nhật: ${group.birthdays[target] || 'Chưa đặt'}\n` +
-        `────────────\n` +
-        `💡 Dùng !diemdanh mỗi ngày để tăng chuỗi streak.`,
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏◈ HỒ SƠ THÀNH VIÊN · ${name(target)}\n` +
+        `▏🏅 Hạng hoạt động: ${rankBadge} (#${rankNum}/${ranking.length})\n` +
+        `▏💬 Tin nhắn 30 ngày: ${count(target)} tin\n` +
+        `▏📅 Điểm danh: ${checkin.total} ngày · chuỗi ${checkin.streak} ngày\n` +
+        `▏Tiến trình mốc: ${renderBar(streakProgress, 10)} ${checkin.streak % 10}/10 ngày\n` +
+        `▏🎂 Sinh nhật: ${group.birthdays[target] || 'Chưa đặt'}\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏💡 Dùng !diemdanh mỗi ngày để tăng chuỗi streak.\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
         threadID,
-        'rank'
+        'profile'
       );
     }
 
@@ -131,24 +141,31 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
       const record = (group.checkins[actor] ||= { lastDay: '', streak: 0, total: 0 });
       if (record.lastDay === today) {
         return send(
-          `╭─ ℹ️ ĐÃ ĐIỂM DANH ─╮\n` +
-          `│ ${name(actor)}\n` +
-          `╰──────────────────╯\n\n` +
-          `✅ ${name(actor)} đã điểm danh hôm nay. Chuỗi hiện tại: ${record.streak} ngày.`,
-          threadID
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `▏◈ THÔNG BÁO ĐIỂM DANH\n` +
+          `▏✅ ${name(actor)} đã điểm danh hôm nay rồi nhé!\n` +
+          `▏🔥 Chuỗi giữ lửa: ${record.streak} ngày liên tiếp\n` +
+          `▏📅 Tổng số ngày: ${record.total} ngày\n` +
+          `▏Hãy quay lại vào ngày mai để tiếp tục giữ lửa nha!\n` +
+          `━━━━━━━━━━━━━━━━━━━━`,
+          threadID,
+          'checkin'
         );
       }
       record.streak = record.lastDay === daysAgo(1, now()) ? record.streak + 1 : 1;
       record.total++;
       record.lastDay = today;
       store.save();
+      const streakMilestone = Math.min(100, Math.round(((record.streak % 10) || 10) * 10));
       return send(
-        `╭─ 🔥 ĐIỂM DANH THÀNH CÔNG ─╮\n` +
-        `│ Chúc mừng ${name(actor)}!\n` +
-        `╰───────────────────────────╯\n\n` +
-        `🔥 Chuỗi ${record.streak} ngày · tổng ${record.total} ngày\n` +
-        `────────────\n` +
-        `💡 Hãy giữ vững phong độ điểm danh vào ngày mai nhé!`,
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏◈ ĐIỂM DANH THÀNH CÔNG\n` +
+        `▏Chúc mừng ${name(actor)} đã điểm danh thành công! ✨\n` +
+        `▏🔥 Chuỗi ${record.streak} ngày · tổng ${record.total} ngày\n` +
+        `▏Mốc tiến trình: ${renderBar(streakMilestone, 10)} ${record.streak % 10}/10 ngày\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏💡 Hãy giữ vững phong độ điểm danh vào ngày mai nhé!\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
         threadID,
         'checkin'
       );
@@ -158,50 +175,60 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
       const rows = currentMembers.map(id => ({ id, ...group.checkins[id] }))
         .filter(row => row.total).sort((a, b) => b.streak - a.streak || b.total - a.total).slice(0, 10);
       const lines = rows.map((row, i) => {
-        const icon = i === 0 ? '👑' : i === 1 ? '🥈' : i === 2 ? '🥉' : ` ${i + 1}.`;
-        return `${icon} ${name(row.id)} ‣ 🔥 ${row.streak} ngày (tổng ${row.total})`;
+        const medal = i === 0 ? '🥇 1.' : i === 1 ? '🥈 2.' : i === 2 ? '🥉 3.' : `   ${i + 1}.`;
+        return `▏${medal} ${name(row.id)}: Chuỗi 🔥 ${row.streak} ngày (${row.total} ngày điểm danh)`;
       });
       return send(
-        `╭─ 📅 BẢNG VÀNG ĐIỂM DANH ─╮\n` +
-        `│ Top chuyên cần của nhóm   │\n` +
-        `╰───────────────────────────╯\n\n` +
-        `${lines.join('\n') || 'Chưa ai điểm danh.'}\n` +
-        `────────────\n` +
-        `💡 Gõ !diemdanh mỗi ngày để ghi tên lên bảng vàng.`,
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏◈ BẢNG VÀNG ĐIỂM DANH CHUYÊN CẦN\n` +
+        `▏Top những người giữ lửa chăm chỉ nhất nhóm:\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `${lines.length ? lines.join('\n') : '▏Chưa có ai điểm danh gần đây.'}\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏💡 Gõ !diemdanh mỗi ngày để ghi danh trên bảng vàng!\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
         threadID,
         'checkin'
       );
     }
 
     if (command === '!bangtuongtac') {
-      const totals = {};
       const start = daysAgo(29, now());
       const end = dayKey(now());
-      for (const [day, pairs] of Object.entries(group.interactions)) {
+      const scores = {};
+      for (const [day, bucket] of Object.entries(group.interactions)) {
         if (day < start || day > end) continue;
-        for (const [pair, count] of Object.entries(pairs)) totals[pair] = (totals[pair] || 0) + count;
+        for (const [pair, count] of Object.entries(bucket)) {
+          scores[pair] = (scores[pair] || 0) + count;
+        }
       }
-      const rows = Object.entries(totals).map(([pair, count]) => ({ ids: pair.split('|'), count }))
-        .filter(row => row.ids.every(id => currentMembers.includes(id)))
-        .sort((a, b) => b.count - a.count).slice(0, 10);
-      const lines = rows.map((row, i) => {
-        const icon = i === 0 ? '💖' : i === 1 ? '🥈' : i === 2 ? '🥉' : ` ${i + 1}.`;
-        return `${icon} ${name(row.ids[0])} ↔ ${name(row.ids[1])} · ${row.count} lần`;
+      const sorted = Object.entries(scores)
+        .map(([pair, count]) => ({ pair: pair.split('|'), count }))
+        .filter(item => item.pair.every(id => currentMembers.includes(id)))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+      const lines = sorted.map((item, i) => {
+        const medal = i === 0 ? '🥇 1.' : i === 1 ? '🥈 2.' : i === 2 ? '🥉 3.' : `   ${i + 1}.`;
+        return `▏${medal} ${name(item.pair[0])} ↔ ${name(item.pair[1])} · ${item.count} lần`;
       });
       return send(
-        `╭─ 💬 CẶP TƯƠNG TÁC · 30 NGÀY ─╮\n` +
-        `│ Top tag & phản hồi nhiều nhất  │\n` +
-        `╰────────────────────────────────╯\n\n` +
-        `${lines.join('\n') || 'Chưa có lượt trả lời hoặc tag nào được ghi nhận.'}\n` +
-        `────────────\n` +
-        `💡 Mỗi tin nhắn tag hoặc trả lời chỉ tính một lần cho mỗi cặp.`,
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏◈ TOP CẶP ĐÔI TƯƠNG TÁC · 30 NGÀY\n` +
+        `▏Những người hay trò chuyện & rep tin nhắn của nhau nhất:\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `${lines.length ? lines.join('\n') : '▏Chưa có tương tác trực tiếp được ghi nhận.'}\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏💡 Reply tin nhắn hoặc tag tên nhau để tính tương tác.\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
         threadID,
-        'rank'
+        'ship'
       );
     }
 
     if (command === '!sinhnhat') {
-      if (!raw || raw.toLowerCase() === 'xem') return send(`🎂 Sinh nhật của ${name(actor)}: ${group.birthdays[actor] || 'chưa đặt'}\nDùng !sinhnhat DD/MM hoặc !sinhnhat xoa.`, threadID);
+      if (!raw || raw.toLowerCase() === 'xem') {
+        return send(`🎂 Sinh nhật của ${name(actor)}: ${group.birthdays[actor] || 'chưa đặt'}\nDùng !sinhnhat DD/MM hoặc !sinhnhat xoa.`, threadID);
+      }
       if (raw.toLowerCase() === 'xoa') {
         delete group.birthdays[actor];
         store.save();
@@ -213,11 +240,13 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
       group.birthdays[actor] = date;
       store.save();
       return send(
-        `╭─ 🎂 CÀI ĐẶT SINH NHẬT ─╮\n` +
-        `│ ${displayName}\n` +
-        `╰────────────────────────╯\n\n` +
-        `✅ Đã lưu sinh nhật của ${displayName}: ${date}.\n` +
-        `⏰ Bot sẽ tự động gửi lời chúc mừng vào lúc 08:00 sáng Việt Nam nếu đang chạy.`,
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏◈ CÀI ĐẶT SINH NHẬT THÀNH CÔNG\n` +
+        `▏Thành viên: ${displayName}\n` +
+        `▏Ngày sinh nhật: ${date} 🎂\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏⏰ Bot sẽ tự động gửi thiệp chúc mừng vào lúc 08:00 sáng!\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
         threadID,
         'birthday'
       );
@@ -230,13 +259,15 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
         return send('Cách dùng: !binhchon Câu hỏi | Lựa chọn 1 | Lựa chọn 2 [| ... tối đa 5]', threadID);
       const [question, ...choices] = pieces;
       const text =
-        `╭─ 🗳️ CUỘC BÌNH CHỌN MỚI ─╮\n` +
-        `│ ${question}\n` +
-        `╰─────────────────────────╯\n\n` +
-        `${choices.map((choice, i) => `${VOTE_EMOJI[i]} ${choice}`).join('\n')}\n` +
-        `────────────\n` +
-        `👉 React thả cảm xúc emoji tương ứng hoặc gõ !vote [1-${choices.length}] để bình chọn!\n` +
-        `📊 Gõ !ketqua để theo dõi kết quả.`;
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏◈ CUỘC BÌNH CHỌN MỚI\n` +
+        `▏Câu hỏi: ${question}\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `${choices.map((choice, i) => `▏${VOTE_EMOJI[i]} ${choice}`).join('\n')}\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏👉 Thả reaction emoji tương ứng hoặc gõ !vote [1-${choices.length}] để bỏ phiếu!\n` +
+        `▏📊 Gõ !ketqua để theo dõi kết quả bình chọn.\n` +
+        `━━━━━━━━━━━━━━━━━━━━`;
       const result = await send(text, threadID, 'poll');
       const messageID = String(result?.messageID || '');
       if (!messageID) return send('Không lấy được ID tin nhắn bình chọn; hãy thử tạo lại.', threadID);
@@ -277,15 +308,16 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
       if (!target || !currentMembers.includes(target)) return send('Cách dùng: !canhbao (trả lời/tag/ID) lý do; !canhbao xem ID; !canhbao xoa ID.', threadID);
       if (mode === 'xem') {
         const warnings = group.warnings[target] || [];
-        const lines = warnings.slice(-5).map((item, i) => `  ${i + 1}. [${item.day}] ${item.reason}`);
+        const lines = warnings.slice(-5).map((item, i) => `▏  ${i + 1}. [${item.day}] ${item.reason}`);
         return send(
-          `╭─ ⚠️ LỊCH SỬ CẢNH CÁO ─╮\n` +
-          `│ ${name(target)}\n` +
-          `╰───────────────────────╯\n\n` +
-          `Tổng số vi phạm: ${warnings.length}\n` +
-          `────────────\n` +
-          `${lines.join('\n') || '  ✨ Chưa có tiền án vi phạm nào.'}`,
-          threadID
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `▏◈ LỊCH SỬ CẢNH CÁO · ${name(target)}\n` +
+          `▏Tổng số vi phạm: ${warnings.length}\n` +
+          `▏━━━━━━━━━━━━━━━━━━━\n` +
+          `${lines.join('\n') || '▏  ✨ Chưa có tiền án vi phạm nào.'}\n` +
+          `━━━━━━━━━━━━━━━━━━━━`,
+          threadID,
+          'warning'
         );
       }
       if (mode === 'xoa') {
@@ -306,20 +338,20 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
       if (warnings.length > 20) warnings.shift();
       store.save();
       return send(
-        `╭─ ⚠️ THÔNG BÁO CẢNH CÁO ─╮\n` +
-        `│ Quản trị viên xử lý vi phạm\n` +
-        `╰─────────────────────────╯\n\n` +
-        `👤 Người vi phạm: ${name(target)}\n` +
-        `🔢 Mức phạt: Cảnh cáo #${warnings.length}\n` +
-        `📝 Lý do: ${reason}\n` +
-        `────────────\n` +
-        `⚠️ Hãy giữ gìn văn hóa trò chuyện của nhóm!`,
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏◈ THÔNG BÁO CẢNH CÁO VI PHẠM\n` +
+        `▏👤 Thành viên: ${name(target)}\n` +
+        `▏🔢 Mức cảnh cáo: #${warnings.length}/3\n` +
+        `▏📝 Lý do: ${reason}\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏⚠️ Hãy giữ gìn văn hóa trò chuyện của nhóm!\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
         threadID,
         'warning'
       );
     }
 
-    if (command === '!ship') {
+    if (command === '!ship' || command === '!ghepdoi') {
       if (currentMembers.length < 2) return send('Cần ít nhất hai thành viên để ghép đôi.', threadID);
       const first = targetOf(event, raw, actor);
       if (!currentMembers.includes(first)) return send('Người này hiện không có trong nhóm.', threadID);
@@ -328,15 +360,18 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
       const second = candidates[digest.readUInt32BE(0) % candidates.length];
       const score = digest.readUInt32BE(4) % 101;
       const hearts = Math.max(1, Math.round(score / 20));
+      const matchTitle = score >= 85 ? 'Cặp đôi trời sinh' : score >= 65 ? 'Bắt sóng rất nhanh' : score >= 40 ? 'Bạn bè hợp cạ' : 'Oan gia ngõ hẹp';
+
       return send(
-        `╭─ 💞 GHÉP ĐÔI HÔM NAY ─╮\n` +
-        `│ Tỉ lệ hợp cạ ngẫu nhiên\n` +
-        `╰───────────────────────╯\n\n` +
-        `✨ ${name(first)} × ${name(second)} ✨\n\n` +
-        `Độ tâm đầu ý hợp: ${score}%\n` +
-        `${'💖'.repeat(hearts)}${'🤍'.repeat(5 - hearts)}\n` +
-        `────────────\n` +
-        `🎲 Chỉ là trò vui ngẫu nhiên giải trí trong ngày!`,
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏◈ TÍN HIỆU ĐÔI BẠN · HỢP CẠ\n` +
+        `▏✨ ${name(first)} × ${name(second)} ✨\n` +
+        `▏Độ tâm đầu ý hợp: ${renderBar(score, 10)} ${score}%\n` +
+        `▏Tần số gắn kết: ${'💖'.repeat(hearts)}${'🤍'.repeat(5 - hearts)}\n` +
+        `▏Danh hiệu: ${matchTitle}\n` +
+        `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏🎲 Kết quả ngẫu nhiên vui vẻ mang tính giải trí!\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
         threadID,
         'ship'
       );
@@ -359,12 +394,12 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
       const names = celebrants.map(([id]) => group.names[id] || id);
       try {
         await send(
-          `╭─ 🎉 CHÚC MỪNG SINH NHẬT ─╮\n` +
-          `│ Hôm nay là ngày đặc biệt! 🎂\n` +
-          `╰──────────────────────────╯\n\n` +
-          `Xin gửi lời chúc mừng sinh nhật ấm áp nhất đến:\n` +
-          `✨ ${names.join(', ')}\n\n` +
-          `Chúc bạn thêm tuổi mới ngập tràn niềm vui, sức khỏe và thành công rực rỡ! 🥳🎈`,
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `▏◈ CHÚC MỪNG SINH NHẬT: ${names.join(', ')}! 🎂\n` +
+          `▏Hôm nay là ngày đặc biệt của bạn!\n` +
+          `▏Chúc bạn tuổi mới rực rỡ, hạnh phúc và vạn sự như ý!\n` +
+          `▏Cả nhà cùng gửi những lời chúc tốt đẹp nhất nhé! 🎉🎈\n` +
+          `━━━━━━━━━━━━━━━━━━━━`,
           threadID,
           'birthday'
         );
@@ -383,5 +418,3 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo }) {
 }
 
 module.exports = { createFeatures, birthdayDate };
-
-
