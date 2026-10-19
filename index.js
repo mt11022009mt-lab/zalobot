@@ -553,6 +553,29 @@ Chúc bạn có những trải nghiệm thật bổ ích cùng anh em! 🔥`
 // =========================================================================
 const groupInfoCache = new Map(); // Cache thông tin quản trị nhóm (TTL: 5 phút)
 const spamWarnings = new Map();   // Cache cảnh cáo vi phạm: key `${threadId}_${uid}` -> { count, timestamp }
+const userMsgMemory = new Map();  // Bộ nhớ tin nhắn chống spam: key `${threadId}_${uid}` -> { lastText, repeatCount, floodTimes, warned, lastWarnTime }
+const userNameCache = new Map();  // Cache tên thành viên để tag tên chuẩn xác (TTL: 10 phút)
+
+async function getUserDisplayName(api, uid) {
+  const cached = userNameCache.get(uid);
+  if (cached && (Date.now() - cached.cachedAt < 10 * 60 * 1000)) {
+    return cached.name;
+  }
+  try {
+    const memInfo = await api.getGroupMembersInfo(uid);
+    const profile = memInfo?.profiles?.[uid] || memInfo?.profiles?.[`${uid}_0`];
+    let name = profile?.displayName || profile?.zaloName || '';
+    if (!name) {
+      const uInfo = await api.getUserInfo(uid);
+      name = uInfo?.data?.[uid]?.zaloName || uInfo?.data?.[uid]?.displayName || '';
+    }
+    if (name) {
+      userNameCache.set(uid, { name, cachedAt: Date.now() });
+      return name;
+    }
+  } catch (err) {}
+  return 'Thành viên';
+}
 
 async function isGroupAdminOrCreator(api, threadId, uid) {
   try {
@@ -745,6 +768,145 @@ async function startBot() {
       const mentions = msgData.mentions || [];
       const trimmed = rawContent.trim();
       const lowerContent = trimmed.toLowerCase();
+
+      // -------------------------------------------------------------
+      // 🛡️ BỘ NHỚ THEO DÕI TIN NHẮN & CHỐNG SPAM (3 LẦN CẢNH BÁO + TAG TÊN, LẦN 4 KICK)
+      // -------------------------------------------------------------
+      if (rawContent && uidFrom && uidFrom !== '0') {
+        const isAdmin = await isGroupAdminOrCreator(api, threadId, uidFrom);
+        // Quản trị viên (Trưởng / Phó nhóm) được miễn trừ kiểm tra spam
+        if (!isAdmin) {
+          const memKey = `${threadId}_${uidFrom}`;
+          const now = Date.now();
+          const cleanText = rawContent.trim().toLowerCase();
+
+          let userMemory = userMsgMemory.get(memKey) || {
+            lastText: '',
+            repeatCount: 0,
+            floodTimes: [],
+            warned: false,
+            lastWarnTime: 0
+          };
+
+          // Nếu đã bị cảnh cáo trước đây nhưng hơn 15 phút không tái phạm thì reset cờ cảnh cáo
+          if (userMemory.warned && (now - userMemory.lastWarnTime > 15 * 60 * 1000)) {
+            userMemory.warned = false;
+          }
+
+          // 1. Kiểm tra spam dồn dập (Flood: 5 tin nhắn trong vòng 4 giây)
+          userMemory.floodTimes = (userMemory.floodTimes || []).filter(t => now - t < 4000);
+          userMemory.floodTimes.push(now);
+
+          // 2. Kiểm tra spam lặp lại nội dung (Repeat: cùng nội dung liên tiếp)
+          if (cleanText.length > 0 && cleanText === userMemory.lastText) {
+            userMemory.repeatCount += 1;
+          } else {
+            userMemory.lastText = cleanText;
+            userMemory.repeatCount = 1;
+          }
+
+          // Điều kiện bị coi là vi phạm lần 3:
+          const isSpamStrike3 = userMemory.repeatCount === 3 || userMemory.floodTimes.length === 5;
+          // Điều kiện bị coi là vi phạm lần 4 (khi đã bị cảnh cáo):
+          const isSpamStrike4 = userMemory.warned && (userMemory.repeatCount >= 4 || userMemory.floodTimes.length >= 6);
+
+          // XỬ LÝ VI PHẠM THÊM LẦN NỮA (LẦN 4 TRỞ LÊN -> KICK KHỎI NHÓM + TAG TÊN)
+          if (isSpamStrike4) {
+            userMsgMemory.delete(memKey); // Reset bộ nhớ người này sau khi kick
+            const memberName = await getUserDisplayName(api, uidFrom);
+            const kickTag = `@${memberName}`;
+
+            try {
+              console.log(`👢 [ANTI-SPAM KICK] Thành viên ${uidFrom} (@${memberName}) tiếp tục spam lần 4, đang kick khỏi nhóm ${threadId}...`);
+              await api.removeUserFromGroup(uidFrom, threadId);
+
+              const kickMsg = 
+`╔════════════════════════════╗
+   👢 ĐÃ 𝐊𝐈𝐂𝐊 𝐓𝐇À𝐍𝐇 𝐕𝐈Ê𝐍 👢
+╚════════════════════════════╝
+⛔ Đã kick ${kickTag} ra khỏi nhóm!
+Lý do: Đã bị cảnh cáo spam tin nhắn 3 lần nhưng vẫn cố tình vi phạm thêm lần nữa.`;
+
+              const mentionPos = kickMsg.indexOf(kickTag);
+              await api.sendMessage(
+                {
+                  msg: kickMsg,
+                  mentions: [
+                    {
+                      pos: mentionPos >= 0 ? mentionPos : 0,
+                      len: kickTag.length,
+                      uid: uidFrom
+                    }
+                  ]
+                },
+                threadId,
+                ThreadType.Group
+              );
+            } catch (kickErr) {
+              console.error('❌ Lỗi khi tự động kick spammer:', kickErr.message);
+              const failMsg = 
+`╔════════════════════════════╗
+   🚫 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐒𝐏𝐀𝐌 𝐊Ị𝐂𝐇 𝐊𝐇𝐔𝐍𝐆 🚫
+╚════════════════════════════╝
+⚠️ Thành viên ${kickTag} đã cố tình spam tin nhắn lần thứ 4!
+❌ Bot chưa thể kick tự động do chưa được set quyền Phó nhóm. Quản trị viên vui lòng xử lý thủ công!`;
+
+              const mentionPos = failMsg.indexOf(kickTag);
+              await api.sendMessage(
+                {
+                  msg: failMsg,
+                  mentions: [
+                    {
+                      pos: mentionPos >= 0 ? mentionPos : 0,
+                      len: kickTag.length,
+                      uid: uidFrom
+                    }
+                  ]
+                },
+                threadId,
+                ThreadType.Group
+              );
+            }
+            return;
+          }
+
+          // XỬ LÝ VI PHẠM KHI SPAM 3 LẦN (CẢNH BÁO + TAG TÊN)
+          if (isSpamStrike3 && !userMemory.warned) {
+            userMemory.warned = true;
+            userMemory.lastWarnTime = now;
+            userMsgMemory.set(memKey, userMemory);
+
+            const memberName = await getUserDisplayName(api, uidFrom);
+            const warnTag = `@${memberName}`;
+            const warnMsg = 
+`╔════════════════════════════╗
+   ⚠️ 𝐂Ả𝐍𝐇 𝐁Á𝐎 𝐒𝐏𝐀𝐌 𝐓𝐈𝐍 𝐍𝐇Ắ𝐍 ⚠️
+╚════════════════════════════╝
+⛔ Nhắc nhở thành viên ${warnTag} !
+Hệ thống phát hiện bạn đang spam tin nhắn liên tục (3 lần vi phạm).
+🚨 𝐂Ả𝐍𝐇 𝐁Á𝐎: Nếu cố tình vi phạm thêm một lần nữa, bot sẽ KICK bạn khỏi nhóm ngay lập tức!`;
+
+            const mentionPos = warnMsg.indexOf(warnTag);
+            await api.sendMessage(
+              {
+                msg: warnMsg,
+                mentions: [
+                  {
+                    pos: mentionPos >= 0 ? mentionPos : 0,
+                    len: warnTag.length,
+                    uid: uidFrom
+                  }
+                ]
+              },
+              threadId,
+              ThreadType.Group
+            );
+            return;
+          }
+
+          userMsgMemory.set(memKey, userMemory);
+        }
+      }
 
       // -------------------------------------------------------------
       // LỆNH 1: MINI GAME ĐO ĐỘ GAY KÈM ẢNH BẢNG KẾT QUẢ CHỨNG NHẬN
@@ -1059,7 +1221,8 @@ ${aiAnswer}`;
 
 🛡️ 𝐁Ả𝐎 𝐕Ệ & 𝐐𝐔Ả𝐍 𝐓𝐑Ị:
 🔹 /kick @tag        : Trưởng/Phó nhóm kick thành viên
-🔹 Tự động gỡ link nhóm Zalo & cảnh cáo 3 lần sẽ KICK!`;
+🔹 Gỡ link nhóm Zalo & cảnh cáo 3 lần KICK!
+🔹 Chống spam tin: Nhắc 3 lần, lần 4 KICK!`;
 
         await api.sendMessage(menuMsg, threadId, ThreadType.Group);
         return;
