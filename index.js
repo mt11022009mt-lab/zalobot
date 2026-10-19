@@ -1578,6 +1578,123 @@ ${aiAnswer}`;
       }
 
       // -------------------------------------------------------------
+      // LỆNH KHẨN CẤP: KHÔI PHỤC & THÊM LẠI / GỬI LỜI MỜI CHO TẤT CẢ THÀNH VIÊN BỊ KICK
+      // Cú pháp: /khoiphuc hoặc /addback hoặc khoiphuc
+      // -------------------------------------------------------------
+      const isRestoreCommand = lowerContent.startsWith('/khoiphuc') || lowerContent.startsWith('khoiphuc') || lowerContent.startsWith('/addback') || lowerContent.startsWith('addback');
+      if (isRestoreCommand) {
+        // Chỉ cho phép Trưởng nhóm hoặc Phó nhóm gọi lệnh
+        const hasPermission = await isGroupAdminOrCreator(api, threadId, uidFrom);
+        if (!hasPermission) {
+          await api.sendMessage('⛔ Chỉ Trưởng nhóm hoặc Phó nhóm mới có quyền sử dụng lệnh khôi phục!', threadId, ThreadType.Group);
+          return;
+        }
+
+        await api.sendMessage('⏳ Đang tiến hành quét lịch sử nhóm để khôi phục và gửi lời mời lại cho toàn bộ thành viên bị kick...', threadId, ThreadType.Group);
+
+        try {
+          // 1. Lấy link nhóm để gửi kèm lời mời
+          let groupLink = '';
+          try {
+            const linkDetail = await api.getGroupLinkDetail(threadId);
+            if (linkDetail && linkDetail.link) {
+              groupLink = linkDetail.link;
+            }
+          } catch (e) {}
+
+          // 2. Lấy 150 tin nhắn gần nhất của nhóm
+          const history = await api.getGroupChatHistory(threadId, 150);
+          const msgs = history?.groupMsgs || [];
+
+          // 3. Tìm các UID bị kick
+          const kickedUids = new Set();
+
+          for (const m of msgs) {
+            const text = typeof m.content === 'string' ? m.content : (m.content?.title || '');
+            if (text.includes('TRỤC XUẤT') || text.includes('BỊ KICK') || text.includes('kick_notice') || text.includes('👢')) {
+              if (Array.isArray(m.mentions)) {
+                for (const mention of m.mentions) {
+                  if (mention.uid && String(mention.uid) !== '0') {
+                    kickedUids.add(String(mention.uid));
+                  }
+                }
+              }
+            }
+            if (m.action === 'remove_member' || m.act === 'remove_member' || m.data?.act === 'remove_member') {
+              const u = m.data?.targetId || m.data?.targetUid || m.data?.memberId;
+              if (u) kickedUids.add(String(u));
+            }
+          }
+
+          const targetList = Array.from(kickedUids);
+          console.log(`📋 [RESTORE] Tìm thấy ${targetList.length} thành viên bị kick:`, targetList);
+
+          if (targetList.length === 0) {
+            await api.sendMessage('ℹ️ Không tìm thấy thành viên nào bị kick trong lịch sử gần đây! Bạn có thể gửi danh sách UID dạng: /khoiphuc <UID1,UID2,...> để bot kéo lại ngay nhé!', threadId, ThreadType.Group);
+            return;
+          }
+
+          let addedCount = 0;
+          let invitedCount = 0;
+          let failedCount = 0;
+
+          for (const targetUid of targetList) {
+            // Thử thêm trực tiếp vào nhóm
+            let addedDirect = false;
+            try {
+              const addRes = await api.addUserToGroup(targetUid, threadId);
+              if (!addRes.errorMembers || !addRes.errorMembers.includes(targetUid)) {
+                addedDirect = true;
+                addedCount++;
+                console.log(`✅ [RESTORE] Đã thêm lại UID ${targetUid} vào nhóm thành công!`);
+              }
+            } catch (addErr) {
+              console.warn(`⚠️ Không thể thêm trực tiếp UID ${targetUid}:`, addErr.message);
+            }
+
+            // Nếu không thêm trực tiếp được (do quyền riêng tư), gửi tin nhắn riêng mời lại
+            if (!addedDirect) {
+              try {
+                const inviteMsg = 
+`Chào bạn 👋
+Vừa nãy bot quản lý nhóm gặp sự cố kỹ thuật dẫn đến việc gửi nhầm thông báo kick. Ban Quản Trị rất xin lỗi bạn vì sự bất tiện này! 🙏
+
+Mời bạn bấm vào đường link dưới đây để tham gia lại nhóm cùng anh em nhé:
+👉 ${groupLink || 'Vui lòng liên hệ Trưởng nhóm để lấy link vào lại nhóm'}`;
+
+                await api.sendMessage(inviteMsg, targetUid, ThreadType.User);
+                invitedCount++;
+                console.log(`📩 [RESTORE] Đã gửi tin nhắn mời riêng cho UID ${targetUid}!`);
+              } catch (dmErr) {
+                console.error(`❌ Không thể gửi tin nhắn riêng cho UID ${targetUid}:`, dmErr.message);
+                failedCount++;
+              }
+            }
+
+            // Nghỉ nhẹ 800ms giữa mỗi thành viên để không bị Zalo rate limit
+            await new Promise(r => setTimeout(r, 800));
+          }
+
+          const resultMsg = 
+`╔══════════════════════════════════╗
+   ♻️ 𝐊Ế𝐓 𝐐𝐔Ả 𝐊𝐇Ô𝐈 𝐏𝐇Ụ𝐂 𝐓𝐇À𝐍𝐇 𝐕𝐈Ê𝐍 ♻️
+╚══════════════════════════════════╝
+
+📊 Tổng số thành viên tìm thấy: ${targetList.length}
+✅ Đã kéo thẳng vào nhóm: ${addedCount} bạn
+📩 Đã gửi tin nhắn mời riêng: ${invitedCount} bạn
+${failedCount > 0 ? `⚠️ Không gửi được (do chặn tin lạ): ${failedCount} bạn\n` : ''}
+🎉 Quá trình khôi phục hoàn tất! Anh em kiểm tra lại nhé!`;
+
+          await api.sendMessage(resultMsg, threadId, ThreadType.Group);
+        } catch (scanErr) {
+          console.error('❌ Lỗi trong quá trình khôi phục thành viên:', scanErr.message);
+          await api.sendMessage(`❌ Lỗi khi quét lịch sử khôi phục: ${scanErr.message}`, threadId, ThreadType.Group);
+        }
+        return;
+      }
+
+      // -------------------------------------------------------------
       // LỆNH 7: MENU TRỢ GIÚP (/menu hoặc /help)
       // -------------------------------------------------------------
       if (lowerContent === '/menu' || lowerContent === '/help' || lowerContent === 'menu') {
