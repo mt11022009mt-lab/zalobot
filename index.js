@@ -780,39 +780,53 @@ async function startBot() {
         const isAdmin = await isGroupAdminOrCreator(api, threadId, uidFrom);
         // Quản trị viên (Trưởng / Phó nhóm) được miễn trừ kiểm tra spam
         if (!isAdmin) {
-          const memKey = `${threadId}_${uidFrom}`;
           const now = Date.now();
+
+          // 0. Bỏ qua tin nhắn lịch sử cũ được Zalo sync lại khi bot vừa kết nối
+          const msgTimestamp = Number(msgData.ts);
+          const realMsgTime = msgTimestamp > 1e11 ? msgTimestamp : (msgTimestamp * 1000 || now);
+          if (now - realMsgTime > 25000) {
+            return;
+          }
+
+          const memKey = `${threadId}_${uidFrom}`;
           const cleanText = rawContent.trim().toLowerCase();
 
           let userMemory = userMsgMemory.get(memKey) || {
             lastText: '',
+            lastTextTime: 0,
             repeatCount: 0,
             floodTimes: [],
             warned: false,
             lastWarnTime: 0
           };
 
-          // Nếu đã bị cảnh cáo trước đây nhưng hơn 15 phút không tái phạm thì reset cờ cảnh cáo
-          if (userMemory.warned && (now - userMemory.lastWarnTime > 15 * 60 * 1000)) {
+          // Nếu đã bị cảnh cáo trước đây nhưng hơn 10 phút không tái phạm thì reset cờ cảnh cáo
+          if (userMemory.warned && (now - userMemory.lastWarnTime > 10 * 60 * 1000)) {
             userMemory.warned = false;
           }
 
-          // 1. Kiểm tra spam dồn dập (Flood: 5 tin nhắn trong vòng 4 giây)
+          // 1. Kiểm tra spam dồn dập (Flood: phải gửi trên 7 tin nhắn trong vòng 4 giây mới tính là spam tool/script)
           userMemory.floodTimes = (userMemory.floodTimes || []).filter(t => now - t < 4000);
           userMemory.floodTimes.push(now);
 
-          // 2. Kiểm tra spam lặp lại nội dung (Repeat: cùng nội dung liên tiếp)
-          if (cleanText.length > 0 && cleanText === userMemory.lastText) {
+          // 2. Kiểm tra spam lặp lại nội dung (Repeat: chỉ tính lặp lại nếu gửi trong vòng 60 giây)
+          const isSameText = cleanText.length > 0 && cleanText === userMemory.lastText;
+          const isWithinRepeatWindow = (now - (userMemory.lastTextTime || 0)) < 60000;
+
+          if (isSameText && isWithinRepeatWindow) {
             userMemory.repeatCount += 1;
           } else {
             userMemory.lastText = cleanText;
             userMemory.repeatCount = 1;
           }
+          userMemory.lastTextTime = now;
 
           // Điều kiện bị coi là vi phạm lần 3:
-          const isSpamStrike3 = userMemory.repeatCount === 3 || userMemory.floodTimes.length === 5;
+          // Gửi cùng 1 nội dung 3 lần liên tiếp trong 60s HOẶC xả 7 tin nhắn dồn dập trong 4s
+          const isSpamStrike3 = userMemory.repeatCount === 3 || userMemory.floodTimes.length === 7;
           // Điều kiện bị coi là vi phạm lần 4 (khi đã bị cảnh cáo):
-          const isSpamStrike4 = userMemory.warned && (userMemory.repeatCount >= 4 || userMemory.floodTimes.length >= 6);
+          const isSpamStrike4 = userMemory.warned && (userMemory.repeatCount >= 4 || userMemory.floodTimes.length >= 8);
 
           // XỬ LÝ VI PHẠM THÊM LẦN NỮA (LẦN 4 TRỞ LÊN -> KICK KHỎI NHÓM + TAG TÊN)
           if (isSpamStrike4) {
