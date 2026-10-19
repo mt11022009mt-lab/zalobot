@@ -5,6 +5,7 @@
   "description": "Bot quản lý nhóm Messenger: thống kê, chào mừng, kick bởi QTV",
   "main": "index.js",
   "scripts": {
+    "postinstall": "node scripts/patch-fca-timeouts.js",
     "start": "node index.js",
     "test": "node --test"
   },
