@@ -279,6 +279,36 @@ function getGayComment(percent) {
 }
 
 /**
+ * HÀM TIỆN ÍCH VẼ VECTOR CANVAS SẮC NÉT (TRÁNH LỖI FONT UNICODE)
+ */
+function drawSparkle(ctx, cx, cy, radius, color) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - radius);
+  ctx.quadraticCurveTo(cx, cy, cx + radius, cy);
+  ctx.quadraticCurveTo(cx, cy, cx, cy + radius);
+  ctx.quadraticCurveTo(cx, cy, cx - radius, cy);
+  ctx.quadraticCurveTo(cx, cy, cx, cy - radius);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawCheckmark(ctx, x, y, size, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x - size * 0.45, y);
+  ctx.lineTo(x - size * 0.1, y + size * 0.35);
+  ctx.lineTo(x + size * 0.45, y - size * 0.35);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
  * THIẾT KẾ ĐỈNH CAO: BANNER CHÀO MỪNG GLASSMORPHISM CYBERPUNK (1000x560)
  */
 function createWelcomeBannerImage(memberName, groupName) {
@@ -287,39 +317,42 @@ function createWelcomeBannerImage(memberName, groupName) {
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
 
+  // Nền Gradient Cyberpunk tím xanh sâu thẳm
   const bg = ctx.createRadialGradient(width / 2, height / 2, 40, width / 2, height / 2, 600);
-  bg.addColorStop(0, '#1c103f');
-  bg.addColorStop(0.55, '#0d0724');
-  bg.addColorStop(1, '#05020f');
+  bg.addColorStop(0, '#1c0d3a');
+  bg.addColorStop(0.55, '#0b041a');
+  bg.addColorStop(1, '#04010a');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, width, height);
 
-  const glow1 = ctx.createRadialGradient(180, 140, 0, 180, 140, 260);
+  // Hiệu ứng ánh sáng neon tỏa ra 2 góc
+  const glow1 = ctx.createRadialGradient(160, 130, 0, 160, 130, 260);
   glow1.addColorStop(0, 'rgba(255, 0, 128, 0.28)');
   glow1.addColorStop(1, 'rgba(0, 0, 0, 0)');
   ctx.fillStyle = glow1;
   ctx.fillRect(0, 0, width, height);
 
-  const glow2 = ctx.createRadialGradient(820, 420, 0, 820, 420, 280);
-  glow2.addColorStop(0, 'rgba(0, 242, 254, 0.24)');
+  const glow2 = ctx.createRadialGradient(840, 430, 0, 840, 430, 280);
+  glow2.addColorStop(0, 'rgba(0, 242, 254, 0.25)');
   glow2.addColorStop(1, 'rgba(0, 0, 0, 0)');
   ctx.fillStyle = glow2;
   ctx.fillRect(0, 0, width, height);
 
+  // Hộp Glassmorphism trung tâm
   const px = 45, py = 45, pw = width - 90, ph = height - 90, pr = 24;
   ctx.save();
   ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
+  ctx.strokeStyle = 'rgba(0, 242, 254, 0.35)';
   ctx.lineWidth = 1.8;
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
-  ctx.shadowBlur = 35;
-  ctx.shadowOffsetY = 15;
+  ctx.shadowColor = 'rgba(0, 242, 254, 0.2)';
+  ctx.shadowBlur = 30;
   ctx.beginPath();
   ctx.roundRect(px, py, pw, ph, pr);
   ctx.fill();
   ctx.stroke();
   ctx.restore();
 
+  // Dải trang trí gradient đầu card
   const topGrad = ctx.createLinearGradient(px + 40, 0, px + pw - 40, 0);
   topGrad.addColorStop(0, '#ff007f');
   topGrad.addColorStop(0.5, '#7928ca');
@@ -329,61 +362,74 @@ function createWelcomeBannerImage(memberName, groupName) {
   ctx.roundRect(px + 30, py + 2, pw - 60, 4, 2);
   ctx.fill();
 
+  // Huy hiệu phía trên
   ctx.fillStyle = 'rgba(255, 0, 128, 0.16)';
   ctx.strokeStyle = '#ff007f';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.roundRect(width / 2 - 180, py + 28, 360, 38, 19);
+  ctx.roundRect(width / 2 - 190, py + 26, 380, 36, 18);
   ctx.fill();
   ctx.stroke();
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = 'bold 15px Segoe UI, Arial, sans-serif';
+  ctx.font = 'bold 13px Segoe UI, Arial, sans-serif';
   ctx.fillStyle = '#ff71ce';
-  ctx.fillText('✨ OFFICIAL COMMUNITY CERTIFICATE ✨', width / 2, py + 47);
+  ctx.fillText('/// OFFICIAL COMMUNITY ACCESS ///', width / 2, py + 44);
 
-  ctx.font = '900 40px Segoe UI, Arial, sans-serif';
-  const titleGrad = ctx.createLinearGradient(0, py + 105, 0, py + 155);
+  // Tiêu đề chính
+  ctx.font = '900 38px Segoe UI, Arial, sans-serif';
+  const titleGrad = ctx.createLinearGradient(0, py + 95, 0, py + 140);
   titleGrad.addColorStop(0, '#ffffff');
   titleGrad.addColorStop(1, '#c4b5fd');
   ctx.fillStyle = titleGrad;
   ctx.fillText('CHÀO MỪNG THÀNH VIÊN MỚI', width / 2, py + 115);
 
+  // Tên thành viên
   const dispName = memberName ? memberName : 'Bạn Mới';
   ctx.font = 'bold 34px Segoe UI, Arial, sans-serif';
   ctx.fillStyle = '#00f2fe';
-  ctx.fillText(`🌟 ${dispName} 🌟`, width / 2, py + 180);
+  ctx.fillText(dispName, width / 2, py + 175);
 
+  // Nhóm gia nhập
   ctx.font = '20px Segoe UI, Arial, sans-serif';
   ctx.fillStyle = '#94a3b8';
-  ctx.fillText(`Đã chính thức gia nhập: ${groupName || 'Cộng đồng'}`, width / 2, py + 230);
+  ctx.fillText('Đã chính thức gia nhập: ' + (groupName || 'Cộng đồng'), width / 2, py + 225);
 
+  // Badge xác thực
+  const badgeW = 440, badgeH = 48;
+  const badgeX = width / 2 - badgeW / 2, badgeY = py + 275;
   ctx.fillStyle = 'rgba(16, 185, 129, 0.15)';
   ctx.strokeStyle = '#10b981';
   ctx.lineWidth = 1.2;
   ctx.beginPath();
-  ctx.roundRect(width / 2 - 210, py + 275, 420, 50, 14);
+  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 14);
   ctx.fill();
   ctx.stroke();
 
-  ctx.font = 'bold 18px Segoe UI, Arial, sans-serif';
-  ctx.fillStyle = '#34d399';
-  ctx.fillText('✔ ĐÃ XÁC THỰC THÀNH VIÊN CHÍNH THỨC', width / 2, py + 300);
+  // Vẽ tick vector sắc nét
+  drawCheckmark(ctx, badgeX + 42, badgeY + badgeH / 2, 20, '#34d399');
 
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 17px Segoe UI, Arial, sans-serif';
+  ctx.fillStyle = '#34d399';
+  ctx.fillText('ĐÃ XÁC THỰC THÀNH VIÊN CHÍNH THỨC', badgeX + 65, badgeY + badgeH / 2);
+
+  // Vẽ các ngôi sao lấp lánh dạng vector
   const sparkles = [
-    [95, 95, 26], [130, 420, 20], [870, 115, 24], [830, 410, 28],
-    [width / 2 - 310, py + 115, 18], [width / 2 + 310, py + 115, 18]
+    [105, 105, 16, '#ffd700'], [135, 420, 14, '#ff71ce'],
+    [865, 115, 15, '#00f2fe'], [825, 410, 18, '#ffd700'],
+    [width / 2 - 280, py + 175, 12, '#00f2fe'], [width / 2 + 280, py + 175, 12, '#00f2fe']
   ];
-  sparkles.forEach(([x, y, s]) => {
-    ctx.font = `${s}px Segoe UI, Arial, sans-serif`;
-    ctx.fillStyle = '#ffd700';
-    ctx.fillText('✦', x, y);
+  sparkles.forEach(([x, y, r, c]) => {
+    drawSparkle(ctx, x, y, r, c);
   });
 
+  // Footer dặn dò
+  ctx.textAlign = 'center';
   ctx.font = '15px Segoe UI, Arial, sans-serif';
   ctx.fillStyle = '#64748b';
-  ctx.fillText('Giao lưu văn minh • Nghiêm cấm spam link • Chúc bạn trải nghiệm vui vẻ! 🔥', width / 2, py + 395);
+  ctx.fillText('Giao lưu văn minh  •  Nghiêm cấm spam link  •  Chúc bạn trải nghiệm vui vẻ!', width / 2, py + 395);
 
   return canvas.toBuffer('image/png');
 }
@@ -545,6 +591,185 @@ Chào mừng bạn đã chính thức gia nhập ${gName} 🚀
 3️⃣ Tuyệt đối KHÔNG gửi link lôi kéo sang nhóm Zalo khác.
 
 Chúc bạn có những trải nghiệm thật bổ ích cùng anh em! 🔥`
+  );
+}
+
+/**
+ * THIẾT KẾ ĐỈNH CAO: BANNER TRỤC XUẤT THÀNH VIÊN WARNING HAZARD (1000x560)
+ */
+function createKickBannerImage(memberName, reason, adminName) {
+  const width = 1000;
+  const height = 560;
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+
+  // Nền đỏ đen huyền bí cảnh báo
+  const bg = ctx.createRadialGradient(width / 2, height / 2, 40, width / 2, height / 2, 600);
+  bg.addColorStop(0, '#2b060f');
+  bg.addColorStop(0.5, '#120206');
+  bg.addColorStop(1, '#050102');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, width, height);
+
+  // Hiệu ứng ánh sáng đỏ cảnh báo rực rỡ
+  const glow1 = ctx.createRadialGradient(160, 130, 0, 160, 130, 280);
+  glow1.addColorStop(0, 'rgba(255, 0, 68, 0.32)');
+  glow1.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = glow1;
+  ctx.fillRect(0, 0, width, height);
+
+  const glow2 = ctx.createRadialGradient(840, 430, 0, 840, 430, 280);
+  glow2.addColorStop(0, 'rgba(255, 85, 0, 0.28)');
+  glow2.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = glow2;
+  ctx.fillRect(0, 0, width, height);
+
+  // Sọc cảnh báo Hazard Stripe ở mép trên
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, width, 10);
+  ctx.clip();
+  for (let x = -20; x < width + 40; x += 28) {
+    ctx.fillStyle = (Math.floor(x / 28) % 2 === 0) ? '#ffaa00' : '#111111';
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + 16, 0);
+    ctx.lineTo(x + 6, 10);
+    ctx.lineTo(x - 10, 10);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Khung Glassmorphism chính
+  const px = 45, py = 45, pw = width - 90, ph = height - 90, pr = 24;
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+  ctx.strokeStyle = 'rgba(255, 0, 68, 0.45)';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = 'rgba(255, 0, 68, 0.3)';
+  ctx.shadowBlur = 35;
+  ctx.beginPath();
+  ctx.roundRect(px, py, pw, ph, pr);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+
+  // Huy hiệu cảnh báo
+  ctx.fillStyle = 'rgba(255, 0, 68, 0.2)';
+  ctx.strokeStyle = '#ff0044';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.roundRect(width / 2 - 210, py + 24, 420, 36, 18);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 13px Segoe UI, Arial, sans-serif';
+  ctx.fillStyle = '#ff4d6d';
+  ctx.fillText('/// SYSTEM SECURITY NOTICE // ENFORCEMENT ///', width / 2, py + 42);
+
+  // Tiêu đề to
+  ctx.font = '900 38px Segoe UI, Arial, sans-serif';
+  const titleGrad = ctx.createLinearGradient(0, py + 85, 0, py + 130);
+  titleGrad.addColorStop(0, '#ffffff');
+  titleGrad.addColorStop(1, '#ff6b81');
+  ctx.fillStyle = titleGrad;
+  ctx.fillText('LỆNH TRỤC XUẤT THÀNH VIÊN', width / 2, py + 105);
+
+  // Tên thành viên bị kick
+  const dispName = memberName ? memberName : 'Người Dùng';
+  ctx.font = 'bold 30px Segoe UI, Arial, sans-serif';
+  ctx.fillStyle = '#ffaa00';
+  ctx.fillText('[!]  ' + dispName + '  [!]', width / 2, py + 160);
+
+  // Bảng chi tiết quyết định (Box trong)
+  const bx = px + 60, by = py + 200, bw = pw - 120, bh = 145;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(bx, by, bw, bh, 14);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.textAlign = 'left';
+  const reasonText = reason || 'Vi phạm nghiêm trọng quy định nhóm';
+  const adminText = adminName || 'Ban Quản Trị';
+
+  const labelX = bx + 30;
+  const valX = bx + 245;
+
+  ctx.font = 'bold 16px Segoe UI, Arial, sans-serif';
+  ctx.fillStyle = '#f87171';
+  ctx.fillText('• ĐỐI TƯỢNG XỬ PHẠT   :', labelX, by + 35);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(dispName, valX, by + 35);
+
+  ctx.fillStyle = '#f87171';
+  ctx.fillText('• LÝ DO TRỤC XUẤT     :', labelX, by + 72);
+  ctx.fillStyle = '#fca5a5';
+  ctx.font = '16px Segoe UI, Arial, sans-serif';
+  const shortReason = reasonText.length > 40 ? reasonText.substring(0, 37) + '...' : reasonText;
+  ctx.fillText(shortReason, valX, by + 72);
+
+  ctx.font = 'bold 16px Segoe UI, Arial, sans-serif';
+  ctx.fillStyle = '#f87171';
+  ctx.fillText('• THẨM QUYỀN RA LỆNH  :', labelX, by + 109);
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillText(adminText, valX, by + 109);
+
+  // DẤU MỘC ĐỎ NGHIÊNG (RED STAMP: TRỤC XUẤT // KICKED)
+  ctx.save();
+  ctx.translate(bx + bw - 130, by + bh - 20);
+  ctx.rotate(-12 * Math.PI / 180);
+  
+  ctx.strokeStyle = 'rgba(255, 0, 51, 0.85)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(-95, -30, 190, 60);
+
+  ctx.strokeStyle = 'rgba(255, 0, 51, 0.4)';
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(-90, -26, 180, 52);
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '900 17px Segoe UI, Arial, sans-serif';
+  ctx.fillStyle = '#ff0033';
+  ctx.fillText('TRỤC XUẤT', 0, -8);
+  ctx.font = 'bold 12px Segoe UI, Arial, sans-serif';
+  ctx.fillStyle = '#ff4d6d';
+  ctx.fillText('OFFICIAL // KICKED', 0, 12);
+  ctx.restore();
+
+  // Chân thông báo
+  ctx.textAlign = 'center';
+  ctx.font = '14px Segoe UI, Arial, sans-serif';
+  ctx.fillStyle = '#71717a';
+  ctx.fillText('Hệ thống tự động thực thi  •  Quyết định có hiệu lực tức thì  •  Tricker Security Bot', width / 2, py + 395);
+
+  return canvas.toBuffer('image/png');
+}
+
+/**
+ * Text card thông báo kick trang trọng & tag đích danh
+ */
+function formatKickCard(targetName, reason, adminName) {
+  const tag = targetName ? `@${targetName}` : 'Thành viên';
+  const r = reason || 'Vi phạm nghiêm trọng quy định nhóm';
+  const a = adminName || 'Ban Quản Trị';
+  return (
+`${tag} 👢 ĐÃ 𝐁Ị 𝐓𝐑Ụ𝐂 𝐗𝐔Ấ𝐓 𝐊𝐇Ỏ𝐈 𝐍𝐇Ó𝐌!
+╔══════════════════════════════════╗
+   ⛔ 𝐓𝐇Ô𝐍𝐆 𝐁Á𝐎 𝐓𝐑Ụ𝐂 𝐗𝐔Ấ𝐓 𝐓𝐇À𝐍𝐇 𝐕𝐈Ê𝐍 ⛔
+╚══════════════════════════════════╝
+
+👤 Thành viên: ${tag}
+⚠️ Lý do: ${r}
+👮 Quyết định bởi: ${a}
+
+📢 Quyết định có hiệu lực tức thì. Toàn thể anh em lưu ý tuân thủ quy định nhóm!`
   );
 }
 
@@ -838,17 +1063,25 @@ async function startBot() {
               console.log(`👢 [ANTI-SPAM KICK] Thành viên ${uidFrom} (@${memberName}) tiếp tục spam lần 4, đang kick khỏi nhóm ${threadId}...`);
               await api.removeUserFromGroup(uidFrom, threadId);
 
-              const kickMsg = 
-`${kickTag} 👢 ĐÃ 𝐁Ị 𝐊𝐈𝐂𝐊 𝐊𝐇Ỏ𝐈 𝐍𝐇Ó𝐌!
-╔════════════════════════════╗
-   👢 𝐗Ử 𝐋Ý 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐒𝐏𝐀𝐌 👢
-╚════════════════════════════╝
-⛔ Thành viên đã bị loại khỏi nhóm!
-Lý do: Đã bị cảnh cáo spam tin nhắn 3 lần nhưng vẫn cố tình tiếp tục vi phạm.`;
+              const reason = 'Cố tình spam tin nhắn lần 4 sau khi cảnh cáo';
+              const admin = 'Tricker Security Bot';
+              const kickImgBuf = createKickBannerImage(memberName, reason, admin);
+              const kickMsg = formatKickCard(memberName, reason, admin);
 
               await api.sendMessage(
                 {
                   msg: kickMsg,
+                  attachments: [
+                    {
+                      data: kickImgBuf,
+                      filename: 'kick_notice.png',
+                      metadata: {
+                        totalSize: kickImgBuf.length,
+                        width: 1000,
+                        height: 560
+                      }
+                    }
+                  ],
                   mentions: [
                     {
                       pos: 0,
@@ -1195,14 +1428,37 @@ ${aiAnswer}`;
           console.log(`👢 [KICK MEMBER] Admin ${uidFrom} yêu cầu kick ${targetUid} (@${targetName}) khỏi nhóm ${threadId}`);
           await api.removeUserFromGroup(targetUid, threadId);
 
-          const kickSuccessMsg = 
-`╔════════════════════════════╗
-   👢 𝐗Ử 𝐋Ý 𝐊𝐈𝐂𝐊 𝐓𝐇À𝐍𝐇 𝐕𝐈Ê𝐍 👢
-╚════════════════════════════╝
-✅ Đã kick @${targetName} ra khỏi nhóm thành công!
-👮 Thực hiện theo lệnh của Quản trị viên.`;
+          const reason = 'Lệnh trục xuất theo yêu cầu Quản trị viên';
+          const admin = 'Ban Quản Trị';
+          const kickImgBuf = createKickBannerImage(targetName, reason, admin);
+          const kickSuccessMsg = formatKickCard(targetName, reason, admin);
+          const kickTag = `@${targetName}`;
 
-          await api.sendMessage(kickSuccessMsg, threadId, ThreadType.Group);
+          await api.sendMessage(
+            {
+              msg: kickSuccessMsg,
+              attachments: [
+                {
+                  data: kickImgBuf,
+                  filename: 'kick_notice.png',
+                  metadata: {
+                    totalSize: kickImgBuf.length,
+                    width: 1000,
+                    height: 560
+                  }
+                }
+              ],
+              mentions: [
+                {
+                  pos: 0,
+                  len: kickTag.length,
+                  uid: targetUid
+                }
+              ]
+            },
+            threadId,
+            ThreadType.Group
+          );
         } catch (kickErr) {
           console.error(`❌ Lỗi khi kick ${targetUid}:`, kickErr.message);
           let reasonMsg = kickErr.message;
@@ -1330,17 +1586,25 @@ ${aiAnswer}`;
             await api.removeUserFromGroup(uidFrom, threadId);
             spamWarnings.delete(warnKey); // Xóa dữ liệu sau khi kick thành công
 
-            const kickNotice = 
-`${tagText} 👢 ĐÃ 𝐁Ị 𝐊𝐈𝐂𝐊 𝐊𝐇Ỏ𝐈 𝐍𝐇Ó𝐌!
-╔════════════════════════════╗
-   👢 𝐗Ử 𝐋Ý 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐒𝐏𝐀𝐌 👢
-╚════════════════════════════╝
-⛔ Thành viên đã bị KICK khỏi nhóm!
-Lý do: Cố tình gửi link nhóm Zalo khác quá 3 lần cảnh cáo.`;
+            const reason = 'Cố tình gửi link nhóm Zalo khác quá 3 lần cảnh cáo';
+            const admin = 'Tricker Security Bot';
+            const kickImgBuf = createKickBannerImage(memberName, reason, admin);
+            const kickNotice = formatKickCard(memberName, reason, admin);
 
             await api.sendMessage(
               {
                 msg: kickNotice,
+                attachments: [
+                  {
+                    data: kickImgBuf,
+                    filename: 'kick_notice.png',
+                    metadata: {
+                      totalSize: kickImgBuf.length,
+                      width: 1000,
+                      height: 560
+                    }
+                  }
+                ],
                 mentions: [
                   {
                     pos: 0,
