@@ -40,9 +40,9 @@ const zalo = new Zalo({
 });
 
 /**
- * Regex phát hiện link nhóm Zalo spam (mọi định dạng zalo.me/g/, zalo.me/s/, chat.zalo.me, zaloapp.com):
+ * Regex phát hiện link nhóm Zalo spam (CHỈ BẮT LINK MỜI NHÓM zalo.me/g/ HOẶC zalo.me/s/):
  */
-const ZALO_GROUP_LINK_REGEX = /(zalo\.me\/(g|s)\/[a-zA-Z0-9_\-]+|chat\.zalo\.me\/|zaloapp\.com\/qr\/g\/)/i;
+const ZALO_GROUP_LINK_REGEX = /(https?:\/\/)?zalo\.me\/(g|s)\/[a-zA-Z0-9_\-]+/i;
 
 // =========================================================================
 // 🛡️ CHỐT AN TOÀN CHỐNG BAN ACC ZALO (ANTI-BAN RATE LIMIT & COOLDOWN)
@@ -1082,7 +1082,7 @@ async function startBot() {
         rawContent = msgData.content;
       } else if (msgData.content && typeof msgData.content === 'object') {
         const c = msgData.content;
-        rawContent = [c.href, c.url, c.link, c.title, c.description, JSON.stringify(c)].filter(Boolean).join(' ');
+        rawContent = [c.href, c.url, c.link, c.title, c.description].filter(Boolean).join(' ');
       }
 
       const threadId = message.threadId || msgData.idTo;
@@ -1152,35 +1152,18 @@ async function startBot() {
           // Điều kiện bị coi là vi phạm lần 4 (khi đã bị cảnh cáo):
           const isSpamStrike4 = userMemory.warned && (userMemory.repeatCount >= 4 || userMemory.floodTimes.length >= 8);
 
-          // XỬ LÝ VI PHẠM THÊM LẦN NỮA (LẦN 4 TRỞ LÊN -> KICK KHỎI NHÓM + TAG TÊN)
+          // XỬ LÝ VI PHẠM THÊM LẦN NỮA (LẦN 4 TRỞ LÊN -> CẢNH BÁO QUẢN TRỊ VIÊN, KHÔNG AUTO KICK)
           if (isSpamStrike4) {
-            userMsgMemory.delete(memKey); // Reset bộ nhớ người này sau khi kick
+            userMsgMemory.delete(memKey);
             const memberName = await resolveMemberName(api, uidFrom, msgData.dName, threadId);
             const kickTag = `@${memberName}`;
 
             try {
-              console.log(`👢 [ANTI-SPAM KICK] Thành viên ${uidFrom} (@${memberName}) tiếp tục spam lần 4, đang kick khỏi nhóm ${threadId}...`);
-              await api.removeUserFromGroup(uidFrom, threadId);
-
-              const reason = 'Cố tình spam tin nhắn lần 4 sau khi cảnh cáo';
-              const admin = 'Tricker Security Bot';
-              const kickImgBuf = createKickBannerImage(memberName, reason, admin);
-              const kickMsg = formatKickCard(memberName, reason, admin);
-
+              console.log(`⚠️ [ANTI-SPAM] Thành viên ${uidFrom} (@${memberName}) vi phạm spam lần 4.`);
+              const warnMsg = `${kickTag} ⚠️ BẠN ĐÃ VI PHẠM SPAM TIN NHẮN LẦN 4! Quản trị viên vui lòng dùng lệnh /kick nếu cần xử lý!`;
               await api.sendMessage(
                 {
-                  msg: kickMsg,
-                  attachments: [
-                    {
-                      data: kickImgBuf,
-                      filename: 'kick_notice.png',
-                      metadata: {
-                        totalSize: kickImgBuf.length,
-                        width: 1000,
-                        height: 560
-                      }
-                    }
-                  ],
+                  msg: warnMsg,
                   mentions: [
                     {
                       pos: 0,
@@ -1192,31 +1175,7 @@ async function startBot() {
                 threadId,
                 ThreadType.Group
               );
-            } catch (kickErr) {
-              console.error('❌ Lỗi khi tự động kick spammer:', kickErr.message);
-              const failMsg = 
-`${kickTag} 🚫 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐒𝐏𝐀𝐌 𝐊Ị𝐂𝐇 𝐊𝐇𝐔𝐍𝐆!
-╔════════════════════════════╗
-   ⚠️ 𝐂Ả𝐍𝐇 𝐁Á𝐎 𝐕𝐈 𝐏𝐇Ạ𝐌 ⚠️
-╚════════════════════════════╝
-⚠️ Thành viên đã cố tình spam tin nhắn lần thứ 4!
-❌ Bot chưa thể kick tự động do chưa được set quyền Phó nhóm. Quản trị viên vui lòng xử lý thủ công!`;
-
-              await api.sendMessage(
-                {
-                  msg: failMsg,
-                  mentions: [
-                    {
-                      pos: 0,
-                      len: kickTag.length,
-                      uid: uidFrom
-                    }
-                  ]
-                },
-                threadId,
-                ThreadType.Group
-              );
-            }
+            } catch (err) {}
             return;
           }
 
@@ -1729,67 +1688,25 @@ ${aiAnswer}`;
             ThreadType.Group
           );
         } else {
-          // Vi phạm đủ 3 lần -> Tự động KICK
-          try {
-            console.log(`👢 [AUTO KICK] UID ${uidFrom} (@${memberName}) vi phạm 3/3 lần, đang tiến hành kick khỏi nhóm ${threadId}...`);
-            await api.removeUserFromGroup(uidFrom, threadId);
-            spamWarnings.delete(warnKey); // Xóa dữ liệu sau khi kick thành công
+          // Vi phạm đủ 3 lần -> Chỉ cảnh báo cho Quản trị viên, KHÔNG AUTO KICK TRÁNH SỰ CỐ
+          spamWarnings.delete(warnKey);
+          console.log(`⚠️ [LINK VIOLATION 3/3] UID ${uidFrom} (@${memberName}) gửi link nhóm lần 3.`);
 
-            const reason = 'Cố tình gửi link nhóm Zalo khác quá 3 lần cảnh cáo';
-            const admin = 'Tricker Security Bot';
-            const kickImgBuf = createKickBannerImage(memberName, reason, admin);
-            const kickNotice = formatKickCard(memberName, reason, admin);
-
-            await api.sendMessage(
-              {
-                msg: kickNotice,
-                attachments: [
-                  {
-                    data: kickImgBuf,
-                    filename: 'kick_notice.png',
-                    metadata: {
-                      totalSize: kickImgBuf.length,
-                      width: 1000,
-                      height: 560
-                    }
-                  }
-                ],
-                mentions: [
-                  {
-                    pos: 0,
-                    len: tagText.length,
-                    uid: uidFrom
-                  }
-                ]
-              },
-              threadId,
-              ThreadType.Group
-            );
-          } catch (kickErr) {
-            console.error('❌ Lỗi khi tự động kick thành viên vi phạm 3 lần:', kickErr.message);
-            const failNotice = 
-`${tagText} 🚫 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐊Ị𝐂𝐇 𝐊𝐇𝐔𝐍𝐆!
-╔════════════════════════════╗
-   🚫 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐊Ị𝐂𝐇 𝐊𝐇𝐔𝐍𝐆 (3/3) 🚫
-╚════════════════════════════╝
-⚠️ Thành viên đã vi phạm đủ 3 lần quy định spam link!
-❌ Bot chưa thể kick tự động do chưa có quyền Phó nhóm. Quản trị viên vui lòng set quyền cho bot hoặc xử lý thủ công!`;
-
-            await api.sendMessage(
-              {
-                msg: failNotice,
-                mentions: [
-                  {
-                    pos: 0,
-                    len: tagText.length,
-                    uid: uidFrom
-                  }
-                ]
-              },
-              threadId,
-              ThreadType.Group
-            );
-          }
+          const warn3Msg = `${tagText} ⚠️ Bạn đã gửi link nhóm Zalo vi phạm lần 3/3! Quản trị viên vui lòng kiểm tra và xử lý bằng lệnh /kick nếu cần!`;
+          await api.sendMessage(
+            {
+              msg: warn3Msg,
+              mentions: [
+                {
+                  pos: 0,
+                  len: tagText.length,
+                  uid: uidFrom
+                }
+              ]
+            },
+            threadId,
+            ThreadType.Group
+          );
         }
       }
     } catch (err) {
