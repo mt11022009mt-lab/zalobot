@@ -6,6 +6,7 @@ const { createBot } = require('./bot');
 
 const http = require('node:http');
 const health = { state: 'starting', updatedAt: new Date().toISOString() };
+const MQTT_DISCONNECTED_LIMIT_MS = 3 * 60 * 1000;
 
 function setHealth(state) {
   health.state = state;
@@ -81,19 +82,23 @@ function startBot() {
     api.setOptions({ listenEvents: true, selfListen: false, autoReconnect: true, emitReady: true });
     const bot = createBot(api, new Store(dataPath));
     let queue = Promise.resolve();
+    let disconnectedSince = Date.now();
     api.listenMqtt((listenError, event) => {
       // Some versions of the unofficial library deliver its ready signal as
       // the first callback argument; accept either position.
       if (listenError?.type === 'ready' || event?.type === 'ready') {
+        disconnectedSince = null;
         setHealth('connected');
         return;
       }
       if (listenError) {
+        disconnectedSince ??= Date.now();
         setHealth('disconnected');
         console.error('Lỗi kết nối Messenger MQTT:', listenError);
         return;
       }
       if (!event) return;
+      disconnectedSince = null;
       setHealth('connected');
       queue = queue.then(() => bot.handle(event)).catch(err => console.error('Lỗi xử lý sự kiện:', err));
     });
@@ -104,7 +109,18 @@ function startBot() {
     const birthdayTimer = setInterval(runBirthdays, 5 * 60 * 1000);
     birthdayTimer.unref?.();
     const connectionTimer = setInterval(() => {
-      if (health.state === 'connected' && !ctx.mqttClient?.connected) setHealth('disconnected');
+      if (health.state === 'stopped') return;
+      if (health.state === 'connected' && !ctx.mqttClient?.connected) {
+        disconnectedSince = Date.now();
+        setHealth('disconnected');
+      }
+      if (health.state === 'connected') return;
+      disconnectedSince ??= Date.now();
+      if (Date.now() - disconnectedSince < MQTT_DISCONNECTED_LIMIT_MS) return;
+      setHealth('stopped');
+      clearInterval(connectionTimer);
+      console.error('MQTT không đồng bộ trong 3 phút; dừng thử nối lại để bảo vệ phiên đăng nhập.');
+      try { api.stopListening?.(); } catch (error) { console.error('Không dừng được MQTT:', error); }
     }, 5000);
     connectionTimer.unref?.();
     console.log('Bot đang theo dõi các nhóm Messenger của tài khoản này.');
