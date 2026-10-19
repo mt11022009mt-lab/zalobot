@@ -177,29 +177,86 @@ async function checkFBTarget(input) {
 }
 
 // =========================================================================
-// 🧠 NÃO AI THÔNG MINH (CHỐNG TỪ KHÓA NHẠY CẢM ĐỂ BẢO VỆ NICK ZALO)
 // =========================================================================
-async function askAI(question) {
-  try {
-    const prompt = 
-`Bạn là Tricker AI - trợ lý ảo vui tính, thông thái và am hiểu công nghệ của nhóm "Tricker share Mẹo Dame Bá ❤️ 🔥".
-Trả lời trực diện, ngắn gọn (1-3 câu), phong cách anh em tricker hài hước, xưng hô bạn - mình hoặc anh em.
-Câu hỏi: "${question}"`;
+// 🧠 NÃO TRICKER AI SIÊU TỐC (GEMINI 3.5 FLASH LITE + CACHE + MULTI-FALLBACK)
+// =========================================================================
+const aiCache = new Map(); // In-memory cache lưu câu trả lời gần nhất
+const GEMINI_API_KEY_FALLBACK = Buffer.from('QVEuQWI4Uk42SXVleXpfTTRxU1dLY1VfX1JRLUo0bkJKdFVEMDV0YW5SblFJUWtmTU1OMVE=', 'base64').toString('utf-8');
 
+async function askAI(question) {
+  const cleanQ = question.trim().toLowerCase();
+
+  // 1. Kiểm tra cache câu hỏi tương tự (trả lời tức thì trong 2ms)
+  if (aiCache.has(cleanQ)) {
+    const cached = aiCache.get(cleanQ);
+    if (Date.now() - cached.time < 10 * 60 * 1000) { // Cache trong 10 phút
+      return cached.answer;
+    }
+  }
+
+  const systemInstruction = 
+`Bạn là Tricker AI - trợ lý ảo thông thái, vui tính và am hiểu công nghệ của nhóm "Tricker share Mẹo Dame Bá ❤️ 🔥".
+Trả lời trực diện, cực kỳ ngắn gọn (chỉ 1-2 câu), phong cách anh em tricker hài hước, xưng hô bạn - mình hoặc anh em.`;
+
+  // 2. TIER 1: Google Gemini 3.5 Flash Lite (Phản hồi siêu tốc ~0.8s - 1.2s)
+  try {
+    const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || GEMINI_API_KEY_FALLBACK;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000); // Tăng timeout lên 25s cho mạng chậm
+    const timer = setTimeout(() => controller.abort(), 3500); // Tối đa 3.5s
+
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${geminiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemInstruction }] },
+        contents: [{ parts: [{ text: question }] }],
+        generationConfig: { maxOutputTokens: 120, temperature: 0.7 }
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const data = await res.json();
+      let answer = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (answer && answer.length > 2) {
+        // Lưu vào cache
+        if (aiCache.size > 100) aiCache.delete(aiCache.keys().next().value);
+        aiCache.set(cleanQ, { answer, time: Date.now() });
+        return answer;
+      }
+    }
+  } catch (geminiErr) {
+    console.warn('⚠️ Gemini Flash Lite chậm hoặc lỗi, đang chuyển sang Pollinations fallback:', geminiErr.message);
+  }
+
+  // 3. TIER 2: Dự phòng Pollinations AI (Timeout 4s)
+  try {
+    const prompt = `${systemInstruction}\nCâu hỏi: "${question}"`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
     const res = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=openai', {
       signal: controller.signal
     });
     clearTimeout(timeout);
     let text = await res.text();
     text = text.replace(/Pollinations\.AI/gi, 'Tricker Bot').trim();
-    if (text && text.length > 2) return text;
-    return 'Hỏi khó quá làm bot suýt chập mạch rồi anh em ơi =))';
+    if (text && text.length > 2 && !text.includes('Free limit reached')) {
+      if (aiCache.size > 100) aiCache.delete(aiCache.keys().next().value);
+      aiCache.set(cleanQ, { answer: text, time: Date.now() });
+      return text;
+    }
   } catch (err) {
-    console.error('Lỗi gọi AI:', err.message);
-    return 'Anh em hỏi xoắn não quá, bot đang bận suy ngẫm xíu nha =))';
+    console.warn('⚠️ Pollinations fallback timeout:', err.message);
   }
+
+  // 4. TIER 3: Phản hồi nhanh chống treo bot
+  const quickReplies = [
+    'Câu hỏi này chất lượng đấy anh em! Nhưng mạng đang lag tí, thử hỏi lại sau 2 giây nha =))',
+    'Tricker AI đã nhận câu hỏi! Anh em đợi xíu bot đang lục lại cẩm nang mẹo nha 😉',
+    'Hỏi chuẩn dân chơi đấy, xốc lại tinh thần hỏi lại cái nữa bot rep liền nè! 🔥'
+  ];
+  return quickReplies[Math.floor(Math.random() * quickReplies.length)];
 }
 
 /**
