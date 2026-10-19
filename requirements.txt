@@ -1,0 +1,2 @@
+# Zero external dependencies required!
+# Project utilizes Python Standard Library 100% (urllib, json, re, concurrent.futures, socket, http.server)

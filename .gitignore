@@ -1,4 +1,17 @@
-node_modules/
-npm-debug.log
-qr.png
-.DS_Store
+# Environment variables (NEVER COMMIT SENSITIVE TOKENS)
+.env
+.env.local
+.env.*.local
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs & temp files
+*.log
+*.tmp
