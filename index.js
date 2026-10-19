@@ -52,13 +52,13 @@ const userCooldowns = new Map();
 
 function isRateLimited(userId) {
   const now = Date.now();
-  // Giới hạn toàn bot: Giữa 2 lần bot trả lời tối thiểu 2.5 giây
-  if (now - lastBotReplyTime < 2500) {
+  // Giới hạn toàn bot: Giữa 2 lần bot trả lời tối thiểu 1.2 giây
+  if (now - lastBotReplyTime < 1200) {
     return true;
   }
-  // Giới hạn cá nhân: Mỗi người chỉ được gọi bot 1 lần trong 6 giây
+  // Giới hạn cá nhân: Mỗi người chỉ được gọi bot cách nhau tối thiểu 1.8 giây
   const lastUserTime = userCooldowns.get(userId) || 0;
-  if (now - lastUserTime < 6000) {
+  if (now - lastUserTime < 1800) {
     return true;
   }
   lastBotReplyTime = now;
