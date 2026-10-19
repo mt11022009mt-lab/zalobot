@@ -556,25 +556,29 @@ const spamWarnings = new Map();   // Cache cảnh cáo vi phạm: key `${threadI
 const userMsgMemory = new Map();  // Bộ nhớ tin nhắn chống spam: key `${threadId}_${uid}` -> { lastText, repeatCount, floodTimes, warned, lastWarnTime }
 const userNameCache = new Map();  // Cache tên thành viên để tag tên chuẩn xác (TTL: 10 phút)
 
-async function getUserDisplayName(api, uid) {
+async function resolveMemberName(api, uid, fallbackName, threadId) {
+  if (fallbackName && typeof fallbackName === 'string' && fallbackName.trim() && fallbackName !== 'null' && fallbackName !== 'undefined') {
+    return fallbackName.trim();
+  }
   const cached = userNameCache.get(uid);
-  if (cached && (Date.now() - cached.cachedAt < 10 * 60 * 1000)) {
+  if (cached && (Date.now() - cached.cachedAt < 10 * 60 * 1000) && cached.name) {
     return cached.name;
   }
   try {
     const memInfo = await api.getGroupMembersInfo(uid);
     const profile = memInfo?.profiles?.[uid] || memInfo?.profiles?.[`${uid}_0`];
     let name = profile?.displayName || profile?.zaloName || '';
-    if (!name) {
-      const uInfo = await api.getUserInfo(uid);
-      name = uInfo?.data?.[uid]?.zaloName || uInfo?.data?.[uid]?.displayName || '';
+    if (!name && threadId) {
+      const gInfo = groupInfoCache.get(threadId);
+      const found = gInfo?.currentMems?.find(m => String(m.id) === String(uid));
+      if (found) name = found.dName || found.zaloName || '';
     }
     if (name) {
       userNameCache.set(uid, { name, cachedAt: Date.now() });
       return name;
     }
   } catch (err) {}
-  return 'Thành viên';
+  return fallbackName || 'bạn';
 }
 
 async function isGroupAdminOrCreator(api, threadId, uid) {
@@ -813,7 +817,7 @@ async function startBot() {
           // XỬ LÝ VI PHẠM THÊM LẦN NỮA (LẦN 4 TRỞ LÊN -> KICK KHỎI NHÓM + TAG TÊN)
           if (isSpamStrike4) {
             userMsgMemory.delete(memKey); // Reset bộ nhớ người này sau khi kick
-            const memberName = await getUserDisplayName(api, uidFrom);
+            const memberName = await resolveMemberName(api, uidFrom, msgData.dName, threadId);
             const kickTag = `@${memberName}`;
 
             try {
@@ -821,19 +825,19 @@ async function startBot() {
               await api.removeUserFromGroup(uidFrom, threadId);
 
               const kickMsg = 
-`╔════════════════════════════╗
-   👢 ĐÃ 𝐊𝐈𝐂𝐊 𝐓𝐇À𝐍𝐇 𝐕𝐈Ê𝐍 👢
+`${kickTag} 👢 ĐÃ 𝐁Ị 𝐊𝐈𝐂𝐊 𝐊𝐇Ỏ𝐈 𝐍𝐇Ó𝐌!
+╔════════════════════════════╗
+   👢 𝐗Ử 𝐋Ý 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐒𝐏𝐀𝐌 👢
 ╚════════════════════════════╝
-⛔ Đã kick ${kickTag} ra khỏi nhóm!
-Lý do: Đã bị cảnh cáo spam tin nhắn 3 lần nhưng vẫn cố tình vi phạm thêm lần nữa.`;
+⛔ Thành viên đã bị loại khỏi nhóm!
+Lý do: Đã bị cảnh cáo spam tin nhắn 3 lần nhưng vẫn cố tình tiếp tục vi phạm.`;
 
-              const mentionPos = kickMsg.indexOf(kickTag);
               await api.sendMessage(
                 {
                   msg: kickMsg,
                   mentions: [
                     {
-                      pos: mentionPos >= 0 ? mentionPos : 0,
+                      pos: 0,
                       len: kickTag.length,
                       uid: uidFrom
                     }
@@ -845,19 +849,19 @@ Lý do: Đã bị cảnh cáo spam tin nhắn 3 lần nhưng vẫn cố tình vi
             } catch (kickErr) {
               console.error('❌ Lỗi khi tự động kick spammer:', kickErr.message);
               const failMsg = 
-`╔════════════════════════════╗
-   🚫 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐒𝐏𝐀𝐌 𝐊Ị𝐂𝐇 𝐊𝐇𝐔𝐍𝐆 🚫
+`${kickTag} 🚫 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐒𝐏𝐀𝐌 𝐊Ị𝐂𝐇 𝐊𝐇𝐔𝐍𝐆!
+╔════════════════════════════╗
+   ⚠️ 𝐂Ả𝐍𝐇 𝐁Á𝐎 𝐕𝐈 𝐏𝐇Ạ𝐌 ⚠️
 ╚════════════════════════════╝
-⚠️ Thành viên ${kickTag} đã cố tình spam tin nhắn lần thứ 4!
+⚠️ Thành viên đã cố tình spam tin nhắn lần thứ 4!
 ❌ Bot chưa thể kick tự động do chưa được set quyền Phó nhóm. Quản trị viên vui lòng xử lý thủ công!`;
 
-              const mentionPos = failMsg.indexOf(kickTag);
               await api.sendMessage(
                 {
                   msg: failMsg,
                   mentions: [
                     {
-                      pos: mentionPos >= 0 ? mentionPos : 0,
+                      pos: 0,
                       len: kickTag.length,
                       uid: uidFrom
                     }
@@ -876,23 +880,22 @@ Lý do: Đã bị cảnh cáo spam tin nhắn 3 lần nhưng vẫn cố tình vi
             userMemory.lastWarnTime = now;
             userMsgMemory.set(memKey, userMemory);
 
-            const memberName = await getUserDisplayName(api, uidFrom);
+            const memberName = await resolveMemberName(api, uidFrom, msgData.dName, threadId);
             const warnTag = `@${memberName}`;
             const warnMsg = 
-`╔════════════════════════════╗
-   ⚠️ 𝐂Ả𝐍𝐇 𝐁Á𝐎 𝐒𝐏𝐀𝐌 𝐓𝐈𝐍 𝐍𝐇Ắ𝐍 ⚠️
+`${warnTag} ⚠️ 𝐂Ả𝐍𝐇 𝐁Á𝐎 𝐒𝐏𝐀𝐌 𝐓𝐈𝐍 𝐍𝐇Ắ𝐍!
+╔════════════════════════════╗
+   🚫 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐒𝐏𝐀𝐌 (3 𝐋Ầ𝐍) 🚫
 ╚════════════════════════════╝
-⛔ Nhắc nhở thành viên ${warnTag} !
-Hệ thống phát hiện bạn đang spam tin nhắn liên tục (3 lần vi phạm).
-🚨 𝐂Ả𝐍𝐇 𝐁Á𝐎: Nếu cố tình vi phạm thêm một lần nữa, bot sẽ KICK bạn khỏi nhóm ngay lập tức!`;
+⛔ Bạn đang spam tin nhắn liên tục trong nhóm (3 lần vi phạm).
+🚨 𝐂Ả𝐍𝐇 𝐁Á𝐎: Nếu cố tình gửi thêm 1 tin nhắn spam nữa, bot sẽ KICK bạn khỏi nhóm ngay lập tức!`;
 
-            const mentionPos = warnMsg.indexOf(warnTag);
             await api.sendMessage(
               {
                 msg: warnMsg,
                 mentions: [
                   {
-                    pos: mentionPos >= 0 ? mentionPos : 0,
+                    pos: 0,
                     len: warnTag.length,
                     uid: uidFrom
                   }
@@ -1279,40 +1282,86 @@ ${aiAnswer}`;
 
         console.log(`⚠️ [SPAM WARN] UID ${uidFrom} bị cảnh cáo lần ${warnData.count}/3`);
 
+        const memberName = await resolveMemberName(api, uidFrom, msgData.dName, threadId);
+        const tagText = `@${memberName}`;
+
         if (warnData.count < 3) {
           const warningCard = 
-`╔════════════════════════════╗
-   🚫 𝐂Ả𝐍𝐇 𝐁Á𝐎 𝐕𝐈 𝐏𝐇Ạ𝐌 (${warnData.count}/3) 🚫
+`${tagText} ⚠️ 𝐂Ả𝐍𝐇 𝐁Á𝐎 𝐒𝐏𝐀𝐌 𝐋𝐈𝐍𝐊 𝐍𝐇Ó𝐌!
+╔════════════════════════════╗
+   🚫 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐋𝐈𝐍𝐊 (${warnData.count}/3) 🚫
 ╚════════════════════════════╝
-⚠️ Phát hiện tin nhắn chứa link nhóm Zalo spam!
-⛔ Hệ thống đã tự động gỡ bỏ tin nhắn.
-⚠️ Cảnh cáo: Tái phạm đủ 3 lần sẽ bị bot tự động KICK khỏi nhóm! (Còn ${3 - warnData.count} lần nhắc nhở)`;
+⚠️ Phát hiện bạn vừa gửi link mời nhóm Zalo khác vào đây!
+⛔ Hệ thống đã tự động gỡ bỏ tin nhắn vi phạm.
+⚠️ Cảnh cáo: Tái phạm đủ 3 lần sẽ bị bot KICK vĩnh viễn khỏi nhóm! (Còn ${3 - warnData.count} lần nhắc nhở)`;
 
-          await api.sendMessage(warningCard, threadId, ThreadType.Group);
+          await api.sendMessage(
+            {
+              msg: warningCard,
+              mentions: [
+                {
+                  pos: 0,
+                  len: tagText.length,
+                  uid: uidFrom
+                }
+              ]
+            },
+            threadId,
+            ThreadType.Group
+          );
         } else {
           // Vi phạm đủ 3 lần -> Tự động KICK
           try {
-            console.log(`👢 [AUTO KICK] UID ${uidFrom} vi phạm 3/3 lần, đang tiến hành kick khỏi nhóm ${threadId}...`);
+            console.log(`👢 [AUTO KICK] UID ${uidFrom} (@${memberName}) vi phạm 3/3 lần, đang tiến hành kick khỏi nhóm ${threadId}...`);
             await api.removeUserFromGroup(uidFrom, threadId);
             spamWarnings.delete(warnKey); // Xóa dữ liệu sau khi kick thành công
 
             const kickNotice = 
-`╔════════════════════════════╗
-   👢 ĐÃ 𝐊𝐈𝐂𝐊 𝐓𝐇À𝐍𝐇 𝐕𝐈Ê𝐍 👢
+`${tagText} 👢 ĐÃ 𝐁Ị 𝐊𝐈𝐂𝐊 𝐊𝐇Ỏ𝐈 𝐍𝐇Ó𝐌!
+╔════════════════════════════╗
+   👢 𝐗Ử 𝐋Ý 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐒𝐏𝐀𝐌 👢
 ╚════════════════════════════╝
-⛔ Thành viên vi phạm đã bị KICK khỏi nhóm!
+⛔ Thành viên đã bị KICK khỏi nhóm!
 Lý do: Cố tình gửi link nhóm Zalo khác quá 3 lần cảnh cáo.`;
 
-            await api.sendMessage(kickNotice, threadId, ThreadType.Group);
+            await api.sendMessage(
+              {
+                msg: kickNotice,
+                mentions: [
+                  {
+                    pos: 0,
+                    len: tagText.length,
+                    uid: uidFrom
+                  }
+                ]
+              },
+              threadId,
+              ThreadType.Group
+            );
           } catch (kickErr) {
             console.error('❌ Lỗi khi tự động kick thành viên vi phạm 3 lần:', kickErr.message);
             const failNotice = 
-`╔════════════════════════════╗
+`${tagText} 🚫 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐊Ị𝐂𝐇 𝐊𝐇𝐔𝐍𝐆!
+╔════════════════════════════╗
    🚫 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐊Ị𝐂𝐇 𝐊𝐇𝐔𝐍𝐆 (3/3) 🚫
 ╚════════════════════════════╝
 ⚠️ Thành viên đã vi phạm đủ 3 lần quy định spam link!
 ❌ Bot chưa thể kick tự động do chưa có quyền Phó nhóm. Quản trị viên vui lòng set quyền cho bot hoặc xử lý thủ công!`;
-            await api.sendMessage(failNotice, threadId, ThreadType.Group);
+
+            await api.sendMessage(
+              {
+                msg: failNotice,
+                mentions: [
+                  {
+                    pos: 0,
+                    len: tagText.length,
+                    uid: uidFrom
+                  }
+                ]
+              },
+              threadId,
+              ThreadType.Group
+            );
           }
         }
       }
