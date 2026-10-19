@@ -110,19 +110,24 @@ def request_json(url: str, *, method: str = "GET", data: dict | None = None,
         raise APIError("API trả dữ liệu không hợp lệ") from exc
 
 
-def resolve_short_link(url: str, timeout: float = 6.0) -> str:
-    """Tự động giải mã link rút gọn (vt.tiktok.com, vm.tiktok.com, fb.me, bit.ly, ...) sang URL đích."""
+def resolve_short_link(url: str, timeout: float = 4.0) -> str:
+    """Tự động giải mã link rút gọn (vt.tiktok.com, vm.tiktok.com, fb.me, bit.ly, ...) sang URL đích siêu tốc."""
     parsed = urlsplit(url if "://" in url else "https://" + url)
     host = (parsed.hostname or "").lower()
     short_domains = {"vt.tiktok.com", "vm.tiktok.com", "fb.me", "ig.me", "tinyurl.com", "bit.ly"}
     if host in short_domains:
         full_url = url if "://" in url else "https://" + url
-        req = Request(full_url, headers={"User-Agent": USER_AGENT_BROWSER})
         try:
+            req = Request(full_url, headers={"User-Agent": USER_AGENT_BROWSER}, method="HEAD")
             with urlopen(req, timeout=timeout) as resp:
                 return resp.geturl()
         except Exception:
-            return url
+            try:
+                req_get = Request(full_url, headers={"User-Agent": USER_AGENT_BROWSER})
+                with urlopen(req_get, timeout=timeout) as resp:
+                    return resp.geturl()
+            except Exception:
+                return url
     return url
 
 
@@ -243,64 +248,93 @@ def parse_account(text: str) -> tuple[str, str, str]:
 
 
 # ==============================================================================
-# BÓC TÁCH DỮ LIỆU CÔNG KHAI
+# BÓC TÁCH DỮ LIỆU CÔNG KHAI & HIGH-SPEED CRAWLER CACHE
 # ==============================================================================
-def lookup_tiktok_public(username: str, timeout: float = 8.0) -> dict | None:
+_HTML_CACHE: dict[str, tuple[float, str]] = {}
+
+def get_cached_page(url: str, ttl: float = 60.0) -> str | None:
+    entry = _HTML_CACHE.get(url)
+    if entry and (time.time() - entry[0] < ttl):
+        return entry[1]
+    return None
+
+def set_cached_page(url: str, page: str) -> None:
+    if len(_HTML_CACHE) > 500:
+        now = time.time()
+        for k in [k for k, (t, _) in _HTML_CACHE.items() if now - t > 60.0]:
+            _HTML_CACHE.pop(k, None)
+    _HTML_CACHE[url] = (time.time(), page)
+    # Lưu thêm biến thể không có dấu gạch chéo cuối
+    if url.endswith("/"):
+        _HTML_CACHE[url[:-1]] = (time.time(), page)
+    else:
+        _HTML_CACHE[url + "/"] = (time.time(), page)
+
+
+def lookup_tiktok_public(username: str, timeout: float = 6.0) -> dict | None:
     url = f"https://www.tiktok.com/@{username}"
-    req = Request(url, headers={"User-Agent": USER_AGENT_CRAWLER, "Accept-Language": "en-US,en;q=0.9"})
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            page = resp.read().decode("utf-8", errors="ignore")
-            desc_m = re.search(r'<meta\s+(?:name|property)="(?:\w+:)?description"\s+content="([^"]+)"', page, re.I)
-            title_m = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', page, re.I)
-            img_m = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', page, re.I)
+    page = get_cached_page(url)
+    if not page:
+        req = Request(url, headers={"User-Agent": USER_AGENT_CRAWLER, "Accept-Language": "en-US,en;q=0.9"})
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                page = resp.read().decode("utf-8", errors="ignore")
+                set_cached_page(url, page)
+        except Exception:
+            return None
 
-            info = {}
-            if title_m:
-                t = html.unescape(title_m.group(1))
-                info["display_name"] = re.sub(r"\s+on\s+TikTok$", "", t, flags=re.I).strip()
-            if img_m:
-                info["avatar_url"] = img_m.group(1)
+    desc_m = re.search(r'<meta\s+(?:name|property)="(?:\w+:)?description"\s+content="([^"]+)"', page, re.I)
+    title_m = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', page, re.I)
+    img_m = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', page, re.I)
 
-            if desc_m:
-                desc = html.unescape(desc_m.group(1))
-                stats = re.search(r'([\d.,KMkm]+)\s+Followers,\s*([\d.,KMkm]+)\s+Following,\s*([\d.,KMkm]+)\s+Likes', desc, re.I)
-                if stats:
-                    info["follower_count"] = stats.group(1).upper()
-                    info["following_count"] = stats.group(2).upper()
-                    info["likes_count"] = stats.group(3).upper()
-            return info if info else None
-    except Exception:
-        return None
+    info = {}
+    if title_m:
+        t = html.unescape(title_m.group(1))
+        info["display_name"] = re.sub(r"\s+on\s+TikTok$", "", t, flags=re.I).strip()
+    if img_m:
+        info["avatar_url"] = img_m.group(1)
+
+    if desc_m:
+        desc = html.unescape(desc_m.group(1))
+        stats = re.search(r'([\d.,KMkm]+)\s+Followers,\s*([\d.,KMkm]+)\s+Following,\s*([\d.,KMkm]+)\s+Likes', desc, re.I)
+        if stats:
+            info["follower_count"] = stats.group(1).upper()
+            info["following_count"] = stats.group(2).upper()
+            info["likes_count"] = stats.group(3).upper()
+    return info if info else None
 
 
-def lookup_instagram_public(username: str, timeout: float = 8.0) -> dict | None:
+def lookup_instagram_public(username: str, timeout: float = 6.0) -> dict | None:
     url = f"https://www.instagram.com/{username}/"
-    req = Request(url, headers={"User-Agent": USER_AGENT_TELEGRAM, "Accept-Language": "en-US,en;q=0.9"})
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            page = resp.read().decode("utf-8", errors="ignore")
-            desc_m = re.search(r'<meta\s+(?:name|property)="(?:\w+:)?description"\s+content="([^"]+)"', page, re.I)
-            title_m = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', page, re.I) or re.search(r'<title>(.*?)</title>', page, re.I)
-            img_m = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', page, re.I)
+    page = get_cached_page(url)
+    if not page:
+        req = Request(url, headers={"User-Agent": USER_AGENT_TELEGRAM, "Accept-Language": "en-US,en;q=0.9"})
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                page = resp.read().decode("utf-8", errors="ignore")
+                set_cached_page(url, page)
+        except Exception:
+            return None
 
-            info = {}
-            if title_m:
-                t = html.unescape(title_m.group(1))
-                info["display_name"] = re.sub(r"\s*(?:\(@\w+\))?\s*[•\-]\s*Instagram.*$", "", t, flags=re.I).strip()
-            if img_m:
-                info["avatar_url"] = img_m.group(1)
+    desc_m = re.search(r'<meta\s+(?:name|property)="(?:\w+:)?description"\s+content="([^"]+)"', page, re.I)
+    title_m = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', page, re.I) or re.search(r'<title>(.*?)</title>', page, re.I)
+    img_m = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', page, re.I)
 
-            if desc_m:
-                desc = html.unescape(desc_m.group(1))
-                stats = re.search(r'([\d.,KMkm]+)\s+Followers,\s*([\d.,KMkm]+)\s+Following,\s*([\d.,KMkm]+)\s+Posts', desc, re.I)
-                if stats:
-                    info["follower_count"] = stats.group(1).upper()
-                    info["following_count"] = stats.group(2).upper()
-                    info["video_count"] = stats.group(3).upper()
-            return info if info else None
-    except Exception:
-        return None
+    info = {}
+    if title_m:
+        t = html.unescape(title_m.group(1))
+        info["display_name"] = re.sub(r"\s*(?:\(@\w+\))?\s*[•\-]\s*Instagram.*$", "", t, flags=re.I).strip()
+    if img_m:
+        info["avatar_url"] = img_m.group(1)
+
+    if desc_m:
+        desc = html.unescape(desc_m.group(1))
+        stats = re.search(r'([\d.,KMkm]+)\s+Followers,\s*([\d.,KMkm]+)\s+Following,\s*([\d.,KMkm]+)\s+Posts', desc, re.I)
+        if stats:
+            info["follower_count"] = stats.group(1).upper()
+            info["following_count"] = stats.group(2).upper()
+            info["video_count"] = stats.group(3).upper()
+    return info if info else None
 
 
 # ==============================================================================
@@ -327,11 +361,11 @@ def check_live_status(platform: str, identifier: str) -> tuple[str, str]:
             "Referer": "https://www.instagram.com/",
         })
         try:
-            with build_opener(_NoRedirect).open(req, timeout=6) as resp:
+            with build_opener(_NoRedirect).open(req, timeout=5) as resp:
                 data = json.load(resp)
                 if data.get("data", {}).get("user"):
                     user = data["data"]["user"]
-                    priv = " [Riêng tư]" if user.get("is_private") else " [Công khai]"
+                    priv = " [Riêng tư 🔒]" if user.get("is_private") else " [Công khai 🌐]"
                     return "LIVE", f"Tài khoản đang hoạt động bình thường{priv}"
         except HTTPError as e:
             if e.code == 404:
@@ -339,27 +373,36 @@ def check_live_status(platform: str, identifier: str) -> tuple[str, str]:
 
     path = f"/@{name}" if platform == "tiktok" else f"/{name}"
     url = f"https://{domains[platform]}{path}/"
-    ua = USER_AGENT_CRAWLER if platform == "tiktok" else USER_AGENT_TELEGRAM
-    req = Request(url, headers={"User-Agent": ua, "Accept-Language": "en-US,en;q=0.9", "Referer": f"https://{domains[platform]}/"})
 
-    try:
-        with urlopen(req, timeout=8) as response:
-            status = response.status
-            final_url = response.geturl()
-            body = response.read(1_000_000)
-            charset = response.headers.get_content_charset() or "utf-8"
-    except HTTPError as error:
-        status = error.code
-        final_url = error.geturl()
-        body = error.read(1_000_000)
-        charset = error.headers.get_content_charset() or "utf-8"
-    except (URLError, TimeoutError, OSError) as e:
-        return "UNKNOWN", f"Lỗi kết nối: {e}"
+    # Kiểm tra nhanh từ cache trước
+    cached_html = get_cached_page(url)
+    if cached_html:
+        page = cached_html
+        status = 200
+        final_url = url
+    else:
+        ua = USER_AGENT_CRAWLER if platform == "tiktok" else USER_AGENT_TELEGRAM
+        req = Request(url, headers={"User-Agent": ua, "Accept-Language": "en-US,en;q=0.9", "Referer": f"https://{domains[platform]}/"})
+        try:
+            with urlopen(req, timeout=6) as response:
+                status = response.status
+                final_url = response.geturl()
+                body = response.read(1_000_000)
+                charset = response.headers.get_content_charset() or "utf-8"
+        except HTTPError as error:
+            status = error.code
+            final_url = error.geturl()
+            body = error.read(1_000_000)
+            charset = error.headers.get_content_charset() or "utf-8"
+        except (URLError, TimeoutError, OSError) as e:
+            return "UNKNOWN", f"Lỗi kết nối: {e}"
 
-    if status in (404, 410):
-        return "DIE", f"Không tìm thấy trang hồ sơ (HTTP {status})"
+        if status in (404, 410):
+            return "DIE", f"Không tìm thấy trang hồ sơ (HTTP {status})"
 
-    page = body.decode(charset, errors="replace")
+        page = body.decode(charset, errors="replace")
+        set_cached_page(url, page)
+        set_cached_page(final_url, page)
     final = urlsplit(final_url)
 
     if re.search(r"/(login|accounts/login|challenge|checkpoint)(/|$)", final.path, re.I):
@@ -559,15 +602,16 @@ def format_number(val: object) -> str:
 
 
 def render_profile_card(platform: str, identifier: str, url: str, info: dict,
-                        live_status: str = "LIVE", reason: str = "") -> str:
+                        live_status: str = "LIVE", reason: str = "",
+                        elapsed: float | None = None) -> str:
     """Thiết kế thẻ Profile Card cao cấp (Gemini 4 + Codex Aesthetic Edition) chuẩn Telegram HTML."""
     platform_meta = {
-        "instagram": ("📸 INSTAGRAM PROFILE", "🟣"),
-        "tiktok": ("🎵 TIKTOK PROFILE", "⚫"),
-        "facebook": ("📘 FACEBOOK PROFILE", "🔵"),
+        "instagram": ("📸 INSTAGRAM PROFILE", "🟣", "Instagram"),
+        "tiktok": ("🎵 TIKTOK PROFILE", "⚫", "TikTok"),
+        "facebook": ("📘 FACEBOOK PROFILE", "🔵", "Facebook"),
     }
-    header_title, dot_icon = platform_meta.get(
-        platform, (f"{platform.upper()} PROFILE", "⚪")
+    header_title, dot_icon, p_name = platform_meta.get(
+        platform, (f"{platform.upper()} PROFILE", "⚪", platform.capitalize())
     )
     safe_id = html.escape(identifier)
     safe_url = html.escape(url)
@@ -576,12 +620,21 @@ def render_profile_card(platform: str, identifier: str, url: str, info: dict,
     safe_name = html.escape(str(display_name))
     badge = format_live_badge(live_status)
 
+    # Thước đo tín hiệu mạng & trạng thái sống động
+    if live_status == "LIVE":
+        signal_bar = "<code>[████████████████████] 100% ONLINE</code>"
+    elif live_status == "DIE":
+        signal_bar = "<code>[░░░░░░░░░░░░░░░░░░░░] OFFLINE / KHÓA</code>"
+    else:
+        signal_bar = "<code>[██████████░░░░░░░░░░] YÊU CẦU ĐĂNG NHẬP</code>"
+
     lines = [
         f"<b>{dot_icon} ━━━━━━━━ {header_title} ━━━━━━━━</b>",
         "",
         f"👤 <b>Tên hiển thị:</b> <b>{safe_name}</b>",
         f"🏷️ <b>Username:</b> <code>@{safe_id}</code>",
         f"⚡ <b>Trạng thái:</b> {badge}",
+        f"📶 <b>Tín hiệu máy chủ:</b> {signal_bar}",
     ]
 
     if reason:
@@ -600,7 +653,7 @@ def render_profile_card(platform: str, identifier: str, url: str, info: dict,
     if "fan_count" in info and info["fan_count"] is not None:
         stat_rows.append(f"• 👍 <b>Lượt thích Trang:</b> <code>{format_number(info['fan_count'])}</code>")
     if "is_verified" in info and info["is_verified"] is not None:
-        ver_text = "Có ✅ (Tích xanh)" if info["is_verified"] else "Không ❌"
+        ver_text = "Có ✅ (Tích xanh chính chủ)" if info["is_verified"] else "Không ❌"
         stat_rows.append(f"• 🛡️ <b>Tích xanh:</b> {ver_text}")
     if "is_private" in info and info["is_private"] is not None:
         priv_text = "Riêng tư 🔒" if info["is_private"] else "Công khai 🌐"
@@ -608,7 +661,7 @@ def render_profile_card(platform: str, identifier: str, url: str, info: dict,
 
     if stat_rows:
         lines.append("")
-        lines.append("📊 <b>CHỈ SỐ TƯƠNG TÁC</b>")
+        lines.append("📊 <b>CHỈ SỐ TƯƠNG TÁC THỜI GIAN THỰC</b>")
         lines.extend(stat_rows)
 
     bio = info.get("biography") or info.get("bio_description") or info.get("about")
@@ -620,7 +673,9 @@ def render_profile_card(platform: str, identifier: str, url: str, info: dict,
 
     lines.append("")
     lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append(f"🔗 <a href=\"{safe_url}\">Mở trang cá nhân gốc trên {platform.capitalize()} ➔</a>")
+    if elapsed is not None:
+        lines.append(f"⚡ <i>Tốc độ phản hồi: <b>{elapsed:.2f}s</b> • Realtime Engine</i>")
+    lines.append(f"🔗 <a href=\"{safe_url}\">Mở trang cá nhân gốc trên {p_name} ➔</a>")
 
     return "\n".join(lines)
 
@@ -642,37 +697,53 @@ WELCOME_HTML = (
 
 
 def render_batch_card(lines: list[str]) -> str:
+    valid_items = [(idx, line.strip()) for idx, line in enumerate(lines[:30], start=1) if line.strip()]
+    if not valid_items:
+        return "⚠️ Không tìm thấy dòng dữ liệu nào hợp lệ để quét."
+
+    t0 = time.perf_counter()
+
+    def check_worker(item):
+        idx, raw_line = item
+        try:
+            platform, identifier, url = parse_account(raw_line)
+            st, reason = check_live_status(platform, identifier)
+            return (idx, platform, identifier, st, reason, None)
+        except Exception as e:
+            return (idx, None, raw_line, "ERROR", "", str(e))
+
+    # Tối ưu hóa: Quét song song bằng ThreadPoolExecutor với tối đa 12 workers
+    with ThreadPoolExecutor(max_workers=min(12, len(valid_items))) as pool:
+        processed_items = list(pool.map(check_worker, valid_items))
+
     results = []
     live_cnt = 0
     die_cnt = 0
     unknown_cnt = 0
 
-    for idx, raw_line in enumerate(lines[:30], start=1):
-        raw_line = raw_line.strip()
-        if not raw_line:
+    for idx, platform, identifier, st, reason, err in processed_items:
+        if err:
+            results.append(f"<b>{idx}.</b> <code>{html.escape(identifier[:30])}</code> ➔ ⚠️ <i>{html.escape(err)}</i>")
             continue
-        try:
-            platform, identifier, url = parse_account(raw_line)
-            st, reason = check_live_status(platform, identifier)
-            p_icon = "🎵" if platform == "tiktok" else ("📸" if platform == "instagram" else "📘")
-            if st == "LIVE":
-                live_cnt += 1
-                status_badge = "🟢 <b>LIVE</b>"
-            elif st == "DIE":
-                die_cnt += 1
-                status_badge = "🔴 <b>DIE</b>"
-            else:
-                unknown_cnt += 1
-                status_badge = "🟡 <b>CHƯA RÕ</b>"
-            results.append(f"<b>{idx}.</b> {p_icon} <code>@{html.escape(identifier)}</code> ➔ {status_badge}")
-        except Exception as e:
-            results.append(f"<b>{idx}.</b> <code>{html.escape(raw_line[:30])}</code> ➔ ⚠️ <i>{html.escape(str(e))}</i>")
 
+        p_icon = "🎵" if platform == "tiktok" else ("📸" if platform == "instagram" else "📘")
+        if st == "LIVE":
+            live_cnt += 1
+            status_badge = "🟢 <b>LIVE</b>"
+        elif st == "DIE":
+            die_cnt += 1
+            status_badge = "🔴 <b>DIE</b>"
+        else:
+            unknown_cnt += 1
+            status_badge = "🟡 <b>CHƯA RÕ</b>"
+        results.append(f"<b>{idx}.</b> {p_icon} <code>@{html.escape(identifier)}</code> ➔ {status_badge}")
+
+    elapsed = time.perf_counter() - t0
     total = live_cnt + die_cnt + unknown_cnt
     output = [
         "📊 <b>BÁO CÁO QUÉT LIVE / DIE HÀNG LOẠT</b>",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"📈 <b>Tổng số đã quét:</b> <code>{total}</code> tài khoản",
+        f"📈 <b>Tổng số đã quét:</b> <code>{total}</code> tài khoản (⚡ <i>Xong trong {elapsed:.2f}s</i>)",
         f"• 🟢 <b>Tài khoản LIVE:</b> <code>{live_cnt}</code>",
         f"• 🔴 <b>Tài khoản DIE:</b> <code>{die_cnt}</code>",
         f"• 🟡 <b>Chưa rõ:</b> <code>{unknown_cnt}</code>",
@@ -687,8 +758,9 @@ def render_batch_card(lines: list[str]) -> str:
 
 def handle(text: str, tiktok: TikTokResearch | None, meta_token: str, meta_version: str,
            ig_session: str | None = None, ig_business_id: str | None = None,
-           chat_id: int | None = None) -> tuple[str, dict | None]:
+           chat_id: int | None = None, start_time: float | None = None) -> tuple[str, dict | None]:
     text = text.strip()
+    elapsed = (time.perf_counter() - start_time) if start_time else None
 
     if text.startswith(("/start", "/help")) or text == "❓ Hướng Dẫn & Trợ Giúp":
         if chat_id:
@@ -775,7 +847,8 @@ def handle(text: str, tiktok: TikTokResearch | None, meta_token: str, meta_versi
                     if pub:
                         info.update(pub)
 
-            card_html = render_profile_card(platform, identifier, url, info, live_status=st, reason=reason)
+            elapsed = (time.perf_counter() - start_time) if start_time else None
+            card_html = render_profile_card(platform, identifier, url, info, live_status=st, reason=reason, elapsed=elapsed)
             avatar = info.get("avatar_url")
             return ResultTuple(card_html, inline_kb, avatar_url=avatar)
         except ValueError as exc:
@@ -816,14 +889,16 @@ def handle(text: str, tiktok: TikTokResearch | None, meta_token: str, meta_versi
             except Exception:
                 pass
 
-        card = render_profile_card(platform, identifier, url, info, live_status=live_status, reason=reason or "Hồ sơ TikTok")
+        elapsed = (time.perf_counter() - start_time) if start_time else None
+        card = render_profile_card(platform, identifier, url, info, live_status=live_status, reason=reason or "Hồ sơ TikTok", elapsed=elapsed)
         avatar = info.get("avatar_url")
         return ResultTuple(card, inline_kb, avatar_url=avatar)
 
     # 2. INSTAGRAM
     elif platform == "instagram":
+        elapsed = (time.perf_counter() - start_time) if start_time else None
         if live_status == "DIE":
-            card = render_profile_card(platform, identifier, url, {}, live_status="DIE", reason=reason or "Tài khoản không tồn tại hoặc đã bị khóa/xóa.")
+            card = render_profile_card(platform, identifier, url, {}, live_status="DIE", reason=reason or "Tài khoản không tồn tại hoặc đã bị khóa/xóa.", elapsed=elapsed)
             return ResultTuple(card, inline_kb, avatar_url=None)
 
         info = {}
@@ -837,7 +912,7 @@ def handle(text: str, tiktok: TikTokResearch | None, meta_token: str, meta_versi
         except Exception:
             pass
 
-        card = render_profile_card(platform, identifier, url, info, live_status="LIVE", reason=reason or "Hồ sơ Instagram đang hoạt động")
+        card = render_profile_card(platform, identifier, url, info, live_status="LIVE", reason=reason or "Hồ sơ Instagram đang hoạt động", elapsed=elapsed)
         avatar = info.get("avatar_url")
         return ResultTuple(card, inline_kb, avatar_url=avatar)
 
@@ -849,11 +924,13 @@ def handle(text: str, tiktok: TikTokResearch | None, meta_token: str, meta_versi
                 info = lookup_facebook(identifier, meta_token, meta_version)
             except Exception:
                 pass
-        card = render_profile_card(platform, identifier, url, info, live_status=live_status, reason=reason or "Trang/Hồ sơ Facebook")
+        elapsed = (time.perf_counter() - start_time) if start_time else None
+        card = render_profile_card(platform, identifier, url, info, live_status=live_status, reason=reason or "Trang/Hồ sơ Facebook", elapsed=elapsed)
         avatar = info.get("avatar_url") or ((info.get("picture") or {}).get("data") or {}).get("url")
         return ResultTuple(card, inline_kb, avatar_url=avatar)
 
-    card = render_profile_card(platform, identifier, url, {}, live_status=live_status, reason=reason)
+    elapsed = (time.perf_counter() - start_time) if start_time else None
+    card = render_profile_card(platform, identifier, url, {}, live_status=live_status, reason=reason, elapsed=elapsed)
     return ResultTuple(card, inline_kb, avatar_url=None)
 
 
@@ -932,15 +1009,24 @@ def process_message_job(token: str, message: dict, tiktok, meta_token: str, meta
     now_str = time.strftime("%H:%M:%S")
     print(f"[{now_str}] 📩 Nhận tin nhắn từ ChatID {chat_id}: {body[:70]!r}", flush=True)
 
+    # ⚡ PHẢN HỒI TỨC THÌ (<0.1s): Bật trạng thái 'đang gõ' ngay lập tức
+    try:
+        telegram_call(token, "sendChatAction", {"chat_id": chat_id, "action": "typing"}, timeout=3)
+    except Exception:
+        pass
+
+    t0 = time.perf_counter()
     try:
         res = handle(
             body, tiktok, meta_token, meta_version,
             ig_session=ig_session, ig_business_id=ig_biz_id,
-            chat_id=chat_id
+            chat_id=chat_id,
+            start_time=t0
         )
         reply_markup = res[1] if res[1] else MAIN_REPLY_KEYBOARD
         send_telegram_result(token, chat_id, res, reply_markup, reply_to_message_id=msg_id)
-        print(f"[{time.strftime('%H:%M:%S')}] 📤 Đã phản hồi thành công tới ChatID {chat_id}", flush=True)
+        elapsed = time.perf_counter() - t0
+        print(f"[{time.strftime('%H:%M:%S')}] 📤 Đã phản hồi tới ChatID {chat_id} (chỉ {elapsed:.2f}s) ⚡", flush=True)
     except Exception as handle_err:
         print(f"[{time.strftime('%H:%M:%S')}] ⚠️ Lỗi xử lý {chat_id}: {handle_err}", file=sys.stderr, flush=True)
         try:
@@ -963,8 +1049,12 @@ def process_callback_job(token: str, cb: dict, tiktok, meta_token: str, meta_ver
     cb_chat = (cb.get("message") or {}).get("chat", {})
     cb_chat_id = cb_chat.get("id")
 
+    toast_msg = "⚡ Đang xử lý siêu tốc..."
+    if cb_data.startswith("recheck:"):
+        toast_msg = "🔄 Đang quét lại dữ liệu mới nhất..."
+
     try:
-        telegram_call(token, "answerCallbackQuery", {"callback_query_id": cb_id}, timeout=5)
+        telegram_call(token, "answerCallbackQuery", {"callback_query_id": cb_id, "text": toast_msg}, timeout=3)
     except Exception:
         pass
 
@@ -991,9 +1081,20 @@ def process_callback_job(token: str, cb: dict, tiktok, meta_token: str, meta_ver
         }, timeout=10)
     elif cb_data.startswith("recheck:"):
         recheck_url = cb_data[8:]
+        # Xóa cache để ép buộc quét mới
+        _HTML_CACHE.pop(recheck_url, None)
+        _HTML_CACHE.pop(recheck_url.rstrip("/"), None)
+        _HTML_CACHE.pop(recheck_url + "/", None)
+
+        try:
+            telegram_call(token, "sendChatAction", {"chat_id": cb_chat_id, "action": "typing"}, timeout=3)
+        except Exception:
+            pass
+
+        t0 = time.perf_counter()
         res = handle(recheck_url, tiktok, meta_token, meta_version,
                      ig_session=ig_session, ig_business_id=ig_biz_id,
-                     chat_id=cb_chat_id)
+                     chat_id=cb_chat_id, start_time=t0)
         recheck_markup = res[1] or MAIN_REPLY_KEYBOARD
         send_telegram_result(token, cb_chat_id, res, recheck_markup,
                              prefix="🔄 <b>KẾT QUẢ QUÉT LẠI MỚI NHẤT:</b>")
@@ -1041,7 +1142,7 @@ def main() -> int:
 
     allowed = {x.strip() for x in os.getenv("ALLOWED_CHAT_IDS", "").split(",") if x.strip()}
 
-    executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="BotWorker")
+    executor = ThreadPoolExecutor(max_workers=16, thread_name_prefix="BotWorker")
     offset = None
 
     print("=" * 65, flush=True)
