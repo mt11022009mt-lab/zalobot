@@ -1,29 +1,46 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const https = require('node:https');
+const http = require('node:http');
 const { loginAsync } = require('@dongdev/fca-unofficial');
 const { Store } = require('./store');
 const { createBot } = require('./bot');
 
-const http = require('node:http');
 const health = { state: 'starting', updatedAt: new Date().toISOString() };
-const MQTT_DISCONNECTED_LIMIT_MS = 3 * 60 * 1000;
 
 function setHealth(state) {
   health.state = state;
   health.updatedAt = new Date().toISOString();
 }
 
+// 1. Lightweight HTTP server to satisfy Render health checks & keep instance alive
 if (process.env.PORT) {
   const port = parseInt(process.env.PORT, 10) || 8080;
   const server = http.createServer((req, res) => {
-    const ready = health.state === 'connected';
-    const status = req.url === '/health' ? 200 : (ready ? 200 : 503);
-    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ...health, messengerConnected: ready }));
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      status: 'ok',
+      state: health.state,
+      updatedAt: health.updatedAt,
+      uptimeSec: Math.round(process.uptime()),
+      messengerConnected: health.state === 'connected'
+    }));
   });
+
   server.listen(port, '0.0.0.0', () => {
     console.log(`[HealthCheck] Web server đang lắng nghe cổng ${port}`);
   });
+
+  // Anti-sleep self ping for Render Free Tier (runs every 8 minutes)
+  const serviceUrl = process.env.RENDER_EXTERNAL_URL || 'https://zalobot-65zd.onrender.com';
+  if (serviceUrl) {
+    const keepAliveTimer = setInterval(() => {
+      https.get(`${serviceUrl}/health`, (res) => {
+        res.resume();
+      }).on('error', () => {});
+    }, 8 * 60 * 1000);
+    keepAliveTimer.unref?.();
+  }
 }
 
 const statePath = path.resolve(process.env.APPSTATE_PATH || 'appstate.json');
@@ -66,67 +83,48 @@ if (!Array.isArray(appState)) {
 
 process.on('uncaughtException', (err) => {
   console.error('[UncaughtException]:', err);
-  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
   console.error('[UnhandledRejection]:', reason);
-  setHealth('error');
 });
 
 function startBot() {
   setHealth('logging_in');
   loginAsync({ appState }, { listenEvents: true, selfListen: false, autoReconnect: true, emitReady: true }).then(ctx => {
     const api = ctx.api;
-    setHealth('connecting');
     api.setOptions({ listenEvents: true, selfListen: false, autoReconnect: true, emitReady: true });
     const bot = createBot(api, new Store(dataPath));
     let queue = Promise.resolve();
-    let disconnectedSince = Date.now();
+
+    setHealth('connected');
+    console.log('Bot đã kết nối Messenger thành công và đang lắng nghe sự kiện...');
+
     api.listenMqtt((listenError, event) => {
-      // Some versions of the unofficial library deliver its ready signal as
-      // the first callback argument; accept either position.
-      if (listenError?.type === 'ready' || event?.type === 'ready') {
-        disconnectedSince = null;
-        setHealth('connected');
-        return;
-      }
       if (listenError) {
-        disconnectedSince ??= Date.now();
-        setHealth('disconnected');
-        console.error('Lỗi kết nối Messenger MQTT:', listenError);
+        if (listenError.type === 'ready') {
+          setHealth('connected');
+          return;
+        }
+        console.error('Sự kiện cảnh báo Messenger MQTT:', listenError);
         return;
       }
       if (!event) return;
-      disconnectedSince = null;
       setHealth('connected');
       queue = queue.then(() => bot.handle(event)).catch(err => console.error('Lỗi xử lý sự kiện:', err));
     });
+
     const runBirthdays = () => {
       queue = queue.then(() => bot.checkBirthdays()).catch(err => console.error('Lỗi chúc mừng sinh nhật:', err));
     };
     runBirthdays();
     const birthdayTimer = setInterval(runBirthdays, 5 * 60 * 1000);
     birthdayTimer.unref?.();
-    const connectionTimer = setInterval(() => {
-      if (health.state === 'stopped') return;
-      if (health.state === 'connected' && !ctx.mqttClient?.connected) {
-        disconnectedSince = Date.now();
-        setHealth('disconnected');
-      }
-      if (health.state === 'connected') return;
-      disconnectedSince ??= Date.now();
-      if (Date.now() - disconnectedSince < MQTT_DISCONNECTED_LIMIT_MS) return;
-      setHealth('stopped');
-      clearInterval(connectionTimer);
-      console.error('MQTT không đồng bộ trong 3 phút; dừng thử nối lại để bảo vệ phiên đăng nhập.');
-      try { api.stopListening?.(); } catch (error) { console.error('Không dừng được MQTT:', error); }
-    }, 5000);
-    connectionTimer.unref?.();
+
     console.log('Bot đang theo dõi các nhóm Messenger của tài khoản này.');
   }).catch(error => {
     setHealth('login_failed');
-    console.error('Đăng nhập Messenger thất bại. Đã dừng thử lại để tránh đăng nhập liên tục:', error);
+    console.error('Đăng nhập Messenger thất bại:', error);
   });
 }
 
