@@ -1,17 +1,22 @@
-# Environment variables (NEVER COMMIT SENSITIVE TOKENS)
+# Node dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Sensitive credentials (NEVER COMMIT COOKIES/KEYS)
+appstate.json
+fca-config.json
 .env
 .env.local
 .env.*.local
 
-# Python cache & artifacts
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Logs & temp files
+# Bot runtime database & logs
+data/
+Fca_Database/
 *.log
 *.tmp
+
+# Python artifacts if any
+__pycache__/
+*.pyc

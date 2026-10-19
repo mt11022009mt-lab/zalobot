@@ -1,0 +1,20 @@
+[
+  {
+    "key": "c_user",
+    "value": "100012345678901",
+    "domain": "facebook.com",
+    "path": "/",
+    "hostOnly": false,
+    "creation": "2026-10-19T10:00:00.000Z",
+    "lastAccessed": "2026-10-19T10:00:00.000Z"
+  },
+  {
+    "key": "xs",
+    "value": "12%3Axxxxxxxxxxxxxx%3A2%3A1729000000%3A-1%3A-1",
+    "domain": "facebook.com",
+    "path": "/",
+    "hostOnly": false,
+    "creation": "2026-10-19T10:00:00.000Z",
+    "lastAccessed": "2026-10-19T10:00:00.000Z"
+  }
+]

@@ -1,73 +1,44 @@
-# 🤖 Bot Telegram Check LIVE/DIE & Thông Tin MXH (FB - TikTok - Instagram)
+# Bot quản lý nhóm Messenger
 
-Hệ thống Bot Telegram chuyên dụng giúp tra cứu thông tin và **kiểm tra trạng thái LIVE / DIE** của các tài khoản mạng xã hội: **Facebook**, **TikTok** và **Instagram**, hỗ trợ **tự động bóc tách đa dạng mọi loại liên kết**.
+Bot thống kê hoạt động, chào mừng người mới, bình chọn và trò vui trong nhóm; quản trị viên có thể kick và ghi cảnh cáo.
 
----
+## Cài đặt
 
-## 🔗 Đa Dạng Liên Kết Được Hỗ Trợ
+1. Cài Node.js 20 trở lên. Trong thư mục dự án chạy `npm install`.
+2. Dùng **tài khoản Facebook riêng cho bot**, thêm tài khoản này vào nhóm Messenger và cấp quyền quản trị viên nếu muốn dùng `!kick`.
+3. Xuất phiên đăng nhập của tài khoản bot thành mảng cookie JSON theo định dạng `appState` của thư viện `@dongdev/fca-unofficial`; đặt tại `appstate.json` trong thư mục dự án, hoặc đặt biến môi trường `APPSTATE_PATH` trỏ tới file đó. Không gửi file này cho ai và không đưa lên Git.
+4. Chạy `npm start`. Bot chỉ theo dõi nhóm mà tài khoản bot tham gia.
 
-Bot được tích hợp bộ phân tích thông minh, tự động nhận diện và bóc tách chính xác tên tài khoản từ hầu hết mọi kiểu link:
+Các lệnh trong nhóm:
 
-### 1. 🎵 TikTok:
-- Link hồ sơ: `https://www.tiktok.com/@username`, `m.tiktok.com/@username`
-- Link video: `https://www.tiktok.com/@username/video/73456789...` *(tự động bóc tách username của tác giả video)*
-- Link phát trực tiếp: `https://www.tiktok.com/@username/live`
-- Link ảnh: `https://www.tiktok.com/@username/photo/...`
-- **Link rút gọn chia sẻ từ app:** `https://vt.tiktok.com/ZSjxxxx/`, `https://vm.tiktok.com/xxxx/` *(tự động giải mã redirect sang link gốc)*
-- Tự động lọc sạch các mã theo dõi: `?_t=...`, `?_r=...`, `?is_from_webapp=1`
+| Lệnh | Tác dụng |
+| --- | --- |
+| `!hoatdong` hoặc `!top` | Xếp hạng số tin nhắn trong 7 ngày; thêm `30` để xem 30 ngày. |
+| `!imlang` | Liệt kê người chưa nhắn trong 7 ngày; thêm `30` để xem 30 ngày. |
+| `!profile` | Thẻ thành viên: tin nhắn 30 ngày, hạng hoạt động, điểm danh và sinh nhật. Trả lời/tag/ID để xem người khác. |
+| `!diemdanh` | Điểm danh một lần mỗi ngày, tính chuỗi ngày liên tiếp. |
+| `!bangdiemdanh` | Bảng chuỗi điểm danh dài nhất. |
+| `!bangtuongtac` | Các cặp tag hoặc trả lời nhau nhiều nhất trong 30 ngày. |
+| `!sinhnhat DD/MM` | Lưu sinh nhật của mình. `!sinhnhat xem` để xem, `!sinhnhat xoa` để xóa. |
+| `!binhchon Câu hỏi | A | B` | Tạo bình chọn có 2–5 lựa chọn. Thành viên react 1️⃣–5️⃣ trên tin nhắn bình chọn. |
+| `!vote 1` | Bỏ hoặc đổi phiếu bằng lệnh khi không dùng được reaction emoji. |
+| `!ketqua` | Xem kết quả bình chọn hiện tại hoặc gần nhất. |
+| `!dongbinhchon` | Người tạo hoặc QTV đóng bình chọn. |
+| `!dogay` | Xem điểm vui của chính mình; trả lời tin nhắn, tag hoặc thêm ID để xem người khác. |
+| `!bangdogay` hoặc `!topgay` | Bảng xếp hạng điểm vui của nhóm trong ngày. |
+| `!ship` | Ghép ngẫu nhiên người dùng với một thành viên khác trong nhóm; trả lời/tag/ID để chọn người. |
+| `!kick` | QTV trả lời tin nhắn của thành viên cần kick, tag họ, hoặc dùng `!kick ID`. |
+| `!canhbao lý do` | QTV trả lời/tag/ID để cảnh cáo. `!canhbao xem ID` và `!canhbao xoa ID` để xem/xóa lịch sử. |
+| `!help` | Hiển thị lệnh. |
 
-### 2. 📘 Facebook:
-- Link Trang / Fanpage / Profile: `https://www.facebook.com/username`, `fb.com/username`
-- Link ID cá nhân: `https://www.facebook.com/profile.php?id=100012345678`
-- Link định dạng People: `https://www.facebook.com/people/Ten-Nguoi-Dung/100012345678/`
-- Link bài viết / ảnh / video: `https://www.facebook.com/username/posts/pfbid...`, `facebook.com/username/photos/...`
-- Hỗ trợ các subdomain: `m.facebook.com`, `mbasic.facebook.com`, `web.facebook.com`, `fb.me`
-- Tự động lọc sạch tracking: `?mibextid=...`, `?ref=...`, `?fref=...`
+Dữ liệu lưu tại `data/activity.json` (đổi bằng `DATA_PATH`). Thống kê bắt đầu khi bot được bật, tính ngày theo múi giờ Việt Nam; không đọc lại lịch sử cũ. Lệnh và tin nhắn thường đều tính vào hoạt động. Số thứ tự chào mừng là **số người hiện trong nhóm sau khi gia nhập**, bao gồm tài khoản bot. Người rời rồi vào lại có thể nhận lại số thứ tự hiện tại.
 
-### 3. 📸 Instagram:
-- Link cá nhân: `https://www.instagram.com/username`, `instagr.am/username`
-- Link tab Reels / Tagged: `https://www.instagram.com/username/reels/`, `instagram.com/username/tagged/`
-- Link sâu (Deep link): `https://www.instagram.com/_u/username/`
-- Tự động lọc sạch tham số chia sẻ app: `?igsh=...`, `?utm_source=...`
+Bot tự chúc sinh nhật từ 08:00 giờ Việt Nam khi đang chạy; nếu khởi động sau 08:00, bot chúc khi vừa hoạt động lại trong ngày đó. Chỉ thành viên hiện trong nhóm được chúc. Mỗi nhóm có một bình chọn mở tại một thời điểm; mỗi thành viên có một phiếu và có thể đổi bằng cách react emoji khác. Dữ liệu điểm danh, sinh nhật, cảnh cáo, bình chọn và tương tác được lưu cùng file thống kê.
 
----
+Điểm `!dogay` là số ngẫu nhiên được tạo từ ID nhóm, ID thành viên và ngày tại Việt Nam. Điểm giữ nguyên trong ngày và đổi vào ngày hôm sau; **không dùng tin nhắn, hồ sơ hay dữ liệu cá nhân để suy đoán xu hướng tính dục**.
 
-## ⚡ Tính Năng Chính
+## Giới hạn cần biết
 
-- 🟢 **LIVE / 🔴 DIE tức thì:** Quét nhanh trạng thái sống/chết của tài khoản mà không cần có API token.
-- 📋 **Check Hàng Loạt (Batch Mode):** Dán danh sách 5-25 tài khoản (mỗi dòng một link hoặc username), bot tự động kiểm tra và trả về bảng thống kê chi tiết.
-- 🔍 **Tra cứu chi tiết:** Tên thật, Bio, Số người theo dõi, Lượt thích, Bài viết, Tích xanh, Trạng thái riêng tư, Avatar HD.
-- 🛡️ **Zero-Dependency:** 100% thư viện chuẩn Python (`urllib`, `json`, `re`). Không cần cài thêm thư viện bên ngoài.
-- 🧪 **Kiểm thử TDD:** 10/10 Unit Tests hoàn thành xuất sắc.
+Thư viện đăng nhập Messenger này **không phải API chính thức của Meta**. Facebook có thể đổi cách đăng nhập, sự kiện nhóm hoặc quyền kick, nên bot có thể ngừng hoạt động và cần cập nhật thư viện. Các cuộc trò chuyện mã hóa đầu cuối có thể không phát đủ sự kiện cho thư viện. Không thể chạy thật trước khi có `appState` của tài khoản bot; không ghi mật khẩu Facebook vào mã nguồn.
 
----
-
-## 🚀 Hướng Dẫn Sử Dụng Nhanh
-
-### Bước 1: Điền Token Bot
-Tạo file `.env` từ `.env.example` và điền:
-```env
-TELEGRAM_BOT_TOKEN=Điền_Token_Của_BotFather_Vào_Đây
-```
-
-### Bước 2: Khởi Động Bot
-Nhấp đúp chuột vào file **`run_bot.bat`** (hoặc chạy lệnh `python bot.py`).
-
----
-
-## 📱 Bảng Lệnh Trên Telegram
-
-| Cú pháp | Ví dụ | Ý nghĩa |
-| :--- | :--- | :--- |
-| `/live <link hoặc handle>` | `/live vt.tiktok.com/ZSjxx/` | **Check trạng thái LIVE hay DIE tức thì** |
-| `/check <link>` | `/check instagram.com/cristiano` | Tra cứu chi tiết tài khoản + badge Live/Die |
-| **Dán link trực tiếp** | `fb.com/vinfastvietnam` | Tự động nhận diện nền tảng & tra cứu |
-| **Gửi danh sách nhiều dòng** | Dán 10 link cùng lúc | **Quét & Thống kê Live/Die hàng loạt** |
-| `/help` | `/help` | Xem hướng dẫn cú pháp |
-
----
-
-## 🧪 Chạy Kiểm Thử Tự Động
-```bash
-python -m unittest discover -s tests
-```
+Phiên bản `4.0.3` của thư viện hiện kéo theo các cảnh báo `npm audit` từ `sqlite3` và các gói con. Không dùng bot với tài khoản chính hoặc trên máy chứa dữ liệu nhạy cảm; cập nhật thư viện khi tác giả phát hành bản vá. Việc cài đặt có thể cần cho phép script cài đặt `sqlite3` nếu môi trường npm chặn script này.

@@ -1,0 +1,16 @@
+{
+  "name": "messenger-group-bot-vn",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bot quản lý nhóm Messenger: thống kê, chào mừng, kick bởi QTV",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@dongdev/fca-unofficial": "4.0.3"
+  }
+}

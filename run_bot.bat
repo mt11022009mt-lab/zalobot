@@ -1,13 +1,30 @@
 @echo off
 chcp 65001 > nul
-title Bot Telegram Check Live/Die MXH (FB - TikTok - Instagram)
+title Bot Messenger Quản Lý Nhóm
 
-:LOOP
-echo ==============================================================================
-echo [START] Đang khởi động Bot Telegram Check MXH... (%date% %time%)
-echo ==============================================================================
-python bot.py
+echo ======================================================
+echo          HE THONG BOT MESSENGER FACEBOOK
+echo ======================================================
+
+cd /d "%~dp0"
+
+if not exist "appstate.json" (
+    echo [CANH BAO] Chua tim thay file 'appstate.json'!
+    echo.
+    echo Huong dan nhanh de chay bot:
+    echo 1. Dung tien ich trinh duyet (nhu 'C3C FBState' hoac 'EditThisCookie')
+    echo    de xuat Cookie cua tai khoan Facebook lam Bot thanh dang JSON.
+    echo 2. Tao file co ten la 'appstate.json' ngay trong thu muc nay:
+    echo    %~dp0appstate.json
+    echo 3. Dan toan bo doan ma cookie JSON vao va luu lai.
+    echo 4. Chay lai file nay!
+    echo ======================================================
+    echo.
+    pause
+    exit /b
+)
+
+echo [OK] Da tim thay appstate.json. Dang khoi chay bot...
 echo.
-echo ⚠️ Bot vừa dừng lại. Tự động phục hồi và chạy lại sau 3 giây... (Nhấn Ctrl+C để thoát hẳn)
-timeout /t 3 > nul
-goto LOOP
+npm start
+pause
