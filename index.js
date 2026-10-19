@@ -548,6 +548,39 @@ Chúc bạn có những trải nghiệm thật bổ ích cùng anh em! 🔥`
   );
 }
 
+// =========================================================================
+// 👮 BỘ QUẢN TRỊ NHÓM & QUYỀN HẠN (TRƯỞNG/PHÓ NHÓM + CẢNH CÁO 3 LẦN KICK)
+// =========================================================================
+const groupInfoCache = new Map(); // Cache thông tin quản trị nhóm (TTL: 5 phút)
+const spamWarnings = new Map();   // Cache cảnh cáo vi phạm: key `${threadId}_${uid}` -> { count, timestamp }
+
+async function isGroupAdminOrCreator(api, threadId, uid) {
+  try {
+    const now = Date.now();
+    let info = groupInfoCache.get(threadId);
+    if (!info || (now - info.cachedAt > 5 * 60 * 1000)) {
+      const res = await api.getGroupInfo(threadId);
+      const fetchedInfo = res?.gridInfoMap?.[threadId];
+      if (fetchedInfo) {
+        info = {
+          creatorId: String(fetchedInfo.creatorId || ''),
+          adminIds: Array.isArray(fetchedInfo.adminIds) ? fetchedInfo.adminIds.map(String) : [],
+          cachedAt: now
+        };
+        groupInfoCache.set(threadId, info);
+      }
+    }
+
+    if (!info) return false;
+    const isCreator = info.creatorId === String(uid);
+    const isAdmin = info.adminIds.includes(String(uid));
+    return isCreator || isAdmin;
+  } catch (err) {
+    console.error('Lỗi kiểm tra quyền Admin/Creator:', err.message);
+    return false;
+  }
+}
+
 async function startBot() {
   let api = null;
 
@@ -937,7 +970,73 @@ ${aiAnswer}`;
       }
 
       // -------------------------------------------------------------
-      // LỆNH 6: MENU TRỢ GIÚP (/menu hoặc /help)
+      // LỆNH 6: TRƯỞNG NHÓM / PHÓ NHÓM KICK THÀNH VIÊN (/kick @tag hoặc kick @tag)
+      // -------------------------------------------------------------
+      const isKickCommand = lowerContent.startsWith('/kick') || lowerContent.startsWith('kick ');
+      if (isKickCommand) {
+        if (isRateLimited(uidFrom)) return;
+
+        // 1. Kiểm tra người gọi lệnh có phải Trưởng nhóm hoặc Phó nhóm không
+        const hasPermission = await isGroupAdminOrCreator(api, threadId, uidFrom);
+        if (!hasPermission) {
+          await api.sendMessage('⛔ Chỉ Trưởng nhóm hoặc Phó nhóm mới có quyền sử dụng lệnh kick!', threadId, ThreadType.Group);
+          return;
+        }
+
+        // 2. Kiểm tra tag người cần kick
+        if (!mentions || mentions.length === 0) {
+          await api.sendMessage('⚠️ Vui lòng @tag thành viên bạn muốn kick! Cú pháp: /kick @tên_thành_viên', threadId, ThreadType.Group);
+          return;
+        }
+
+        const targetMention = mentions[0];
+        const targetUid = String(targetMention.uid);
+
+        let targetName = 'thành viên';
+        if (targetMention.len > 1) {
+          const rawName = rawContent.substring(targetMention.pos, targetMention.pos + targetMention.len).replace(/^@/, '').trim();
+          if (rawName) targetName = rawName;
+        }
+
+        // Không cho phép tự kick chính mình
+        if (targetUid === uidFrom) {
+          await api.sendMessage('😅 Bạn là Quản trị viên, không thể tự kick chính mình được đâu nha!', threadId, ThreadType.Group);
+          return;
+        }
+
+        // Kiểm tra xem người bị tag có phải là Quản trị viên / Trưởng nhóm không
+        const targetIsAdmin = await isGroupAdminOrCreator(api, threadId, targetUid);
+        if (targetIsAdmin) {
+          await api.sendMessage('⚠️ Không thể kick Quản trị viên hoặc Trưởng/Phó nhóm!', threadId, ThreadType.Group);
+          return;
+        }
+
+        // 3. Thực hiện kick thành viên
+        try {
+          console.log(`👢 [KICK MEMBER] Admin ${uidFrom} yêu cầu kick ${targetUid} (@${targetName}) khỏi nhóm ${threadId}`);
+          await api.removeUserFromGroup(targetUid, threadId);
+
+          const kickSuccessMsg = 
+`╔════════════════════════════╗
+   👢 𝐗Ử 𝐋Ý 𝐊𝐈𝐂𝐊 𝐓𝐇À𝐍𝐇 𝐕𝐈Ê𝐍 👢
+╚════════════════════════════╝
+✅ Đã kick @${targetName} ra khỏi nhóm thành công!
+👮 Thực hiện theo lệnh của Quản trị viên.`;
+
+          await api.sendMessage(kickSuccessMsg, threadId, ThreadType.Group);
+        } catch (kickErr) {
+          console.error(`❌ Lỗi khi kick ${targetUid}:`, kickErr.message);
+          let reasonMsg = kickErr.message;
+          if (reasonMsg.includes('166') || reasonMsg.includes('permission')) {
+            reasonMsg = 'Bot chưa được set quyền Phó nhóm hoặc người được tag có quyền hạn cao hơn!';
+          }
+          await api.sendMessage(`❌ Không thể kick @${targetName}!\nNguyên nhân: ${reasonMsg}`, threadId, ThreadType.Group);
+        }
+        return;
+      }
+
+      // -------------------------------------------------------------
+      // LỆNH 7: MENU TRỢ GIÚP (/menu hoặc /help)
       // -------------------------------------------------------------
       if (lowerContent === '/menu' || lowerContent === '/help' || lowerContent === 'menu') {
         if (isRateLimited(uidFrom)) return;
@@ -949,24 +1048,25 @@ ${aiAnswer}`;
 
 🛠️ 𝐂Ô𝐍𝐆 𝐂Ụ 𝐓𝐑𝐈𝐂𝐊𝐄𝐑:
 🔹 /2fa <secret_key> : Lấy mã OTP 2 bước siêu tốc
-🔹 /check <uid>      : Kiểm tra UID Facebook Live hay Die
+🔹 /check <uid/link> : Kiểm tra UID Facebook Live hay Die
 🔹 /ip <địa_chỉ_ip>  : Tra cứu nguồn gốc mạng & quốc gia
 
 🧠 𝐓𝐑Ợ 𝐋Ý 𝐀𝐈:
-🔹 bot ơi <câu hỏi>  : Trò chuyện & giải đáp mọi thắc mắc
+🔹 bot ơi <câu hỏi>  : Trò chuyện & giải đáp siêu tốc
 
 🎮 𝐆𝐈Ả𝐈 𝐓𝐑Í:
 🔹 độ gay @tag       : Quét độ gay xuất bằng chứng nhận VIP
 
-🛡️ 𝐁Ả𝐎 𝐕Ệ:
-🔹 Tự động gỡ link nhóm Zalo spam & chào đón tân binh!`;
+🛡️ 𝐁Ả𝐎 𝐕Ệ & 𝐐𝐔Ả𝐍 𝐓𝐑Ị:
+🔹 /kick @tag        : Trưởng/Phó nhóm kick thành viên
+🔹 Tự động gỡ link nhóm Zalo & cảnh cáo 3 lần sẽ KICK!`;
 
         await api.sendMessage(menuMsg, threadId, ThreadType.Group);
         return;
       }
 
       // -------------------------------------------------------------
-      // TỰ ĐỘNG PHÁT HIỆN & THU HỒI / XÓA TIN NHẮN CHỨA LINK NHÓM ZALO
+      // TỰ ĐỘNG PHÁT HIỆN & THU HỒI / XÓA TIN NHẮN CHỨA LINK NHÓM ZALO + CẢNH BÁO 3 LẦN KICK
       // -------------------------------------------------------------
       if (ZALO_GROUP_LINK_REGEX.test(rawContent)) {
         console.log(`🚨 [CẢNH BÁO SPAM LINK] Phát hiện link nhóm Zalo từ UID: ${uidFrom}`);
@@ -1001,15 +1101,56 @@ ${aiAnswer}`;
           }
         }
 
-        if (deleted) {
+        // Quản lý hệ thống cảnh cáo 3 lần (Warn System)
+        const warnKey = `${threadId}_${uidFrom}`;
+        const warnData = spamWarnings.get(warnKey) || { count: 0, timestamp: Date.now() };
+
+        // Nếu vi phạm cách đây hơn 24 giờ thì reset lại đếm
+        if (Date.now() - warnData.timestamp > 24 * 60 * 60 * 1000) {
+          warnData.count = 0;
+        }
+
+        warnData.count += 1;
+        warnData.timestamp = Date.now();
+        spamWarnings.set(warnKey, warnData);
+
+        console.log(`⚠️ [SPAM WARN] UID ${uidFrom} bị cảnh cáo lần ${warnData.count}/3`);
+
+        if (warnData.count < 3) {
           const warningCard = 
 `╔════════════════════════════╗
-   🚫 𝐂Ả𝐍𝐇 𝐁Á𝐎 𝐕𝐈 𝐏𝐇Ạ𝐌 🚫
+   🚫 𝐂Ả𝐍𝐇 𝐁Á𝐎 𝐕𝐈 𝐏𝐇Ạ𝐌 (${warnData.count}/3) 🚫
 ╚════════════════════════════╝
-⚠️ Tin nhắn từ thành viên chứa link nhóm Zalo khác!
-⛔ Hệ thống đã tự động gỡ bỏ tin nhắn để bảo vệ an toàn cho nhóm.`;
+⚠️ Phát hiện tin nhắn chứa link nhóm Zalo spam!
+⛔ Hệ thống đã tự động gỡ bỏ tin nhắn.
+⚠️ Cảnh cáo: Tái phạm đủ 3 lần sẽ bị bot tự động KICK khỏi nhóm! (Còn ${3 - warnData.count} lần nhắc nhở)`;
 
           await api.sendMessage(warningCard, threadId, ThreadType.Group);
+        } else {
+          // Vi phạm đủ 3 lần -> Tự động KICK
+          try {
+            console.log(`👢 [AUTO KICK] UID ${uidFrom} vi phạm 3/3 lần, đang tiến hành kick khỏi nhóm ${threadId}...`);
+            await api.removeUserFromGroup(uidFrom, threadId);
+            spamWarnings.delete(warnKey); // Xóa dữ liệu sau khi kick thành công
+
+            const kickNotice = 
+`╔════════════════════════════╗
+   👢 ĐÃ 𝐊𝐈𝐂𝐊 𝐓𝐇À𝐍𝐇 𝐕𝐈Ê𝐍 👢
+╚════════════════════════════╝
+⛔ Thành viên vi phạm đã bị KICK khỏi nhóm!
+Lý do: Cố tình gửi link nhóm Zalo khác quá 3 lần cảnh cáo.`;
+
+            await api.sendMessage(kickNotice, threadId, ThreadType.Group);
+          } catch (kickErr) {
+            console.error('❌ Lỗi khi tự động kick thành viên vi phạm 3 lần:', kickErr.message);
+            const failNotice = 
+`╔════════════════════════════╗
+   🚫 𝐕𝐈 𝐏𝐇Ạ𝐌 𝐊Ị𝐂𝐇 𝐊𝐇𝐔𝐍𝐆 (3/3) 🚫
+╚════════════════════════════╝
+⚠️ Thành viên đã vi phạm đủ 3 lần quy định spam link!
+❌ Bot chưa thể kick tự động do chưa có quyền Phó nhóm. Quản trị viên vui lòng set quyền cho bot hoặc xử lý thủ công!`;
+            await api.sendMessage(failNotice, threadId, ThreadType.Group);
+          }
         }
       }
     } catch (err) {
