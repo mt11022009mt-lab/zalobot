@@ -40,9 +40,9 @@ const zalo = new Zalo({
 });
 
 /**
- * Regex phát hiện link nhóm Zalo spam:
+ * Regex phát hiện link nhóm Zalo spam (mọi định dạng zalo.me/g/, zalo.me/s/, chat.zalo.me, zaloapp.com):
  */
-const ZALO_GROUP_LINK_REGEX = /(https?:\/\/)?(zalo\.me\/g\/[a-zA-Z0-9_\-]+|chat\.zalo\.me\/.*)/i;
+const ZALO_GROUP_LINK_REGEX = /(zalo\.me\/(g|s)\/[a-zA-Z0-9_\-]+|chat\.zalo\.me\/|zaloapp\.com\/qr\/g\/)/i;
 
 // =========================================================================
 // 🛡️ CHỐT AN TOÀN CHỐNG BAN ACC ZALO (ANTI-BAN RATE LIMIT & COOLDOWN)
@@ -989,7 +989,14 @@ async function startBot() {
       
       if (!isGroup) return;
 
-      const rawContent = typeof msgData.content === 'string' ? msgData.content : (msgData.content?.title || '');
+      let rawContent = '';
+      if (typeof msgData.content === 'string') {
+        rawContent = msgData.content;
+      } else if (msgData.content && typeof msgData.content === 'object') {
+        const c = msgData.content;
+        rawContent = [c.href, c.url, c.link, c.title, c.description, JSON.stringify(c)].filter(Boolean).join(' ');
+      }
+
       const threadId = message.threadId || msgData.idTo;
       const msgId = msgData.msgId;
       const cliMsgId = msgData.cliMsgId;
@@ -997,6 +1004,10 @@ async function startBot() {
       const mentions = msgData.mentions || [];
       const trimmed = rawContent.trim();
       const lowerContent = trimmed.toLowerCase();
+
+      if (rawContent) {
+        console.log(`📩 [TIN NHẮN NHÓM ${threadId}] UID ${uidFrom}: ${rawContent.substring(0, 100)}`);
+      }
 
       // -------------------------------------------------------------
       // 🛡️ BỘ NHỚ THEO DÕI TIN NHẮN & CHỐNG SPAM (3 LẦN CẢNH BÁO + TAG TÊN, LẦN 4 KICK)
