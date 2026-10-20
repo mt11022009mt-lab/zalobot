@@ -62,7 +62,16 @@ function scoreBar(score, width = 10) {
 
 function createBot(api, store, options = {}) {
   const botID = String(api.getCurrentUserID());
-  const rawSend = options.send || ((text, threadID) => api.sendMessage(text, threadID));
+  const rawSend = options.send || ((text, threadID) => {
+    console.log(`[Bot Phản Hồi] Đang gửi tin nhắn đến nhóm ${threadID}...`);
+    return api.sendMessage(text, threadID, (err, msgInfo) => {
+      if (err) {
+        console.error(`[Lỗi Gửi Tin Nhắn] Nhóm ${threadID}:`, err?.error || err?.message || err);
+      } else {
+        console.log(`[Gửi Thành Công] Nhóm ${threadID}`);
+      }
+    });
+  });
   const send = (msg, threadID, imageKey) => {
     if (options.send) return options.send(msg, threadID, imageKey);
     if (typeof msg === 'string' && imageKey) {
@@ -348,16 +357,22 @@ function createBot(api, store, options = {}) {
     if (event.type !== 'message' && event.type !== 'message_reply') return;
     if (String(event.senderID) === botID) return;
     const body = String(event.body || '').trim();
+    console.log(`[Tin Nhắn Đến] Từ ${event.senderID} (nhóm ${event.threadID}): "${body}"`);
     const match = /^!(hoatdong|top|rank|thongke|stats|imlang|kick|help|dogay|bangdogay|topgay|profile|hoso|diemdanh|bangdiemdanh|bangtuongtac|sinhnhat|binhchon|vote|ketqua|dongbinhchon|canhbao|ship|ghepdoi|qtv|admin)(?:\s+(.*))?$/i.exec(body);
     let group = store.data.groups[String(event.threadID)] ? store.group(event.threadID) : null;
     if (!group?.initialized) {
+      console.log(`[Khởi Tạo Nhóm] Đang tải thông tin nhóm ${event.threadID}...`);
       const found = await groupInfo(event.threadID);
-      if (!found) return;
+      if (!found) {
+        console.warn(`[Bỏ Qua] Không thể lấy thông tin nhóm hoặc đây là chat 1-1 (thread ${event.threadID})`);
+        return;
+      }
       group = found.group;
     }
     if (trackMessage(group, event)) features.trackInteractions(group, event);
     if (!match) return;
     const command = `!${match[1].toLowerCase()}`;
+    console.log(`[Khớp Lệnh] Người dùng ${event.senderID} gọi lệnh: ${command}`);
 
     if (command === '!help') {
       return send(
