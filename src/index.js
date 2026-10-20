@@ -6,25 +6,68 @@ const { loginAsync } = require('@dongdev/fca-unofficial');
 const { Store } = require('./store');
 const { createBot } = require('./bot');
 
-const health = { state: 'starting', updatedAt: new Date().toISOString() };
+// Circular log buffer to inspect live logs via /logs endpoint
+const MAX_LOGS = 150;
+const recentLogs = [];
 
-function setHealth(state) {
-  health.state = state;
-  health.updatedAt = new Date().toISOString();
+function captureLog(type, ...args) {
+  const time = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  const msg = args.map(arg => {
+    if (typeof arg === 'object' && arg !== null) {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    }
+    return String(arg);
+  }).join(' ');
+
+  recentLogs.push(`[${time}] [${type.toUpperCase()}] ${msg}`);
+  if (recentLogs.length > MAX_LOGS) recentLogs.shift();
 }
 
-// 1. Lightweight HTTP server to satisfy Render health checks & keep instance alive
+const originalLog = console.log;
+const originalError = console.error;
+const originalWarn = console.warn;
+
+console.log = (...args) => { originalLog(...args); captureLog('info', ...args); };
+console.error = (...args) => { originalError(...args); captureLog('error', ...args); };
+console.warn = (...args) => { originalWarn(...args); captureLog('warn', ...args); };
+
+const health = {
+  state: 'starting',
+  updatedAt: new Date().toISOString(),
+  lastEventAt: null,
+  errorDetail: null,
+  uid: null
+};
+
+function setHealth(state, errorDetail = null) {
+  health.state = state;
+  health.updatedAt = new Date().toISOString();
+  if (errorDetail) health.errorDetail = errorDetail;
+}
+
+// 1. HTTP server serving healthcheck & debug log viewer
 if (process.env.PORT) {
   const port = parseInt(process.env.PORT, 10) || 8080;
   const server = http.createServer((req, res) => {
+    const url = req.url || '/';
+
+    if (url === '/logs') {
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      const header = `=== NHẬT KÝ HOẠT ĐỘNG BOT MESSENGER (${health.state.toUpperCase()}) ===\nUptime: ${Math.round(process.uptime())}s | UID: ${health.uid || 'chưa có'}\n\n`;
+      return res.end(header + recentLogs.join('\n'));
+    }
+
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({
-      status: 'ok',
+      status: health.state === 'auth_error' ? 'auth_required' : 'ok',
       state: health.state,
-      updatedAt: health.updatedAt,
+      errorDetail: health.errorDetail,
+      uid: health.uid,
       uptimeSec: Math.round(process.uptime()),
-      messengerConnected: health.state === 'connected'
-    }));
+      lastEventAt: health.lastEventAt,
+      messengerConnected: health.state === 'connected',
+      viewLogsUrl: '/logs'
+    }, null, 2));
   });
 
   server.listen(port, '0.0.0.0', () => {
@@ -65,20 +108,21 @@ if (process.env.APPSTATE_JSON) {
 
 if (!appState) {
   if (!fs.existsSync(statePath)) {
-    console.error(`Chưa có phiên đăng nhập: ${statePath} hoặc biến môi trường APPSTATE_JSON. Xem README.md.`);
-    process.exit(1);
-  }
-  try {
-    appState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-  } catch (error) {
-    console.error('Không đọc được AppState từ file:', error.message);
-    process.exit(1);
+    console.error(`Chưa có phiên đăng nhập: ${statePath} hoặc biến môi trường APPSTATE_JSON.`);
+    setHealth('no_cookie', 'Chưa có file appstate.json hoặc biến môi trường APPSTATE_JSON');
+  } else {
+    try {
+      appState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    } catch (error) {
+      console.error('Không đọc được AppState từ file:', error.message);
+      setHealth('cookie_corrupted', error.message);
+    }
   }
 }
 
-if (!Array.isArray(appState)) {
+if (appState && !Array.isArray(appState)) {
   console.error('AppState phải là mảng cookie JSON hợp lệ.');
-  process.exit(1);
+  setHealth('cookie_invalid_format', 'AppState không phải dạng mảng');
 }
 
 process.on('uncaughtException', (err) => {
@@ -89,16 +133,32 @@ process.on('unhandledRejection', (reason) => {
   console.error('[UnhandledRejection]:', reason);
 });
 
+let currentApi = null;
+let reconnectTimer = null;
+
 function startBot() {
+  if (!Array.isArray(appState)) return;
+
   setHealth('logging_in');
-  loginAsync({ appState }, { listenEvents: true, selfListen: false, autoReconnect: true, emitReady: true }).then(ctx => {
+  console.log('Đang đăng nhập vào Facebook Messenger...');
+
+  loginAsync({ appState }, {
+    listenEvents: true,
+    selfListen: false,
+    autoReconnect: true,
+    emitReady: true
+  }).then(ctx => {
     const api = ctx.api;
+    currentApi = api;
+    const myUid = api.getCurrentUserID?.();
+    health.uid = myUid;
+
     api.setOptions({ listenEvents: true, selfListen: false, autoReconnect: true, emitReady: true });
     const bot = createBot(api, new Store(dataPath));
     let queue = Promise.resolve();
 
     setHealth('connected');
-    console.log('Bot đã kết nối Messenger thành công và đang lắng nghe sự kiện...');
+    console.log(`Bot đã kết nối Messenger thành công! UID: ${myUid}`);
 
     api.listenMqtt((listenError, event) => {
       if (listenError) {
@@ -106,10 +166,25 @@ function startBot() {
           setHealth('connected');
           return;
         }
-        console.error('Sự kiện cảnh báo Messenger MQTT:', listenError);
+
+        const errMsg = String(listenError.error || listenError.message || JSON.stringify(listenError));
+        console.error('Sự kiện cảnh báo Messenger MQTT:', errMsg);
+
+        if (/blocked the login|not_logged_in|1357001|login_blocked/i.test(errMsg)) {
+          setHealth('auth_error', 'Facebook đã đăng xuất phiên đăng nhập này (Mã lỗi 1357001 / login_blocked). Cần lấy cookie mới.');
+          return;
+        }
+
+        if (listenError.type === 'stop_listen') {
+          setHealth('disconnected', 'Mất kết nối MQTT');
+          scheduleRetry();
+        }
         return;
       }
+
       if (!event) return;
+
+      health.lastEventAt = new Date().toISOString();
       setHealth('connected');
       queue = queue.then(() => bot.handle(event)).catch(err => console.error('Lỗi xử lý sự kiện:', err));
     });
@@ -123,9 +198,25 @@ function startBot() {
 
     console.log('Bot đang theo dõi các nhóm Messenger của tài khoản này.');
   }).catch(error => {
-    setHealth('login_failed');
-    console.error('Đăng nhập Messenger thất bại:', error);
+    const msg = String(error?.message || error?.error || error);
+    console.error('Đăng nhập Messenger thất bại:', msg);
+
+    if (/blocked the login|not_logged_in|1357001|login_blocked/i.test(msg)) {
+      setHealth('auth_error', 'Facebook chặn đăng nhập hoặc bắt đăng nhập lại (error 1357001). Cần cập nhật cookie mới.');
+    } else {
+      setHealth('login_failed', msg);
+      scheduleRetry();
+    }
   });
+}
+
+function scheduleRetry() {
+  if (reconnectTimer) return;
+  console.log('Sẽ thử kết nối lại sau 30 giây...');
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    startBot();
+  }, 30000);
 }
 
 startBot();
