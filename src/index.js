@@ -196,7 +196,6 @@ function startBot() {
 
     api.setOptions({ listenEvents: true, selfListen: false, autoReconnect: true, emitReady: true });
     const bot = createBot(api, new Store(dataPath));
-    let queue = Promise.resolve();
 
     setHealth('connected');
     console.log(`Bot đã kết nối Messenger thành công! UID: ${myUid}`);
@@ -234,11 +233,12 @@ function startBot() {
 
       health.lastEventAt = new Date().toISOString();
       setHealth('connected');
-      queue = queue.then(() => bot.handle(event)).catch(err => console.error('Lỗi xử lý sự kiện:', err));
+      // Xử lý song song không chờ hàng đợi để đạt tốc độ phản hồi tức thì
+      bot.handle(event).catch(err => console.error('Lỗi xử lý sự kiện:', err));
     });
 
     const runBirthdays = () => {
-      queue = queue.then(() => bot.checkBirthdays()).catch(err => console.error('Lỗi chúc mừng sinh nhật:', err));
+      bot.checkBirthdays().catch(err => console.error('Lỗi chúc mừng sinh nhật:', err));
     };
     runBirthdays();
     const birthdayTimer = setInterval(runBirthdays, 5 * 60 * 1000);

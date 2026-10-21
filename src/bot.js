@@ -62,6 +62,8 @@ function scoreBar(score, width = 10) {
 
 function createBot(api, store, options = {}) {
   const botID = String(api.getCurrentUserID());
+  const enableAttachments = process.env.ENABLE_ATTACHMENTS === 'true';
+
   const rawSend = options.send || ((text, threadID) => {
     console.log(`[Bot Phản Hồi] Đang gửi tin nhắn đến nhóm ${threadID}...`);
     return api.sendMessage(text, threadID, (err, msgInfo) => {
@@ -72,9 +74,11 @@ function createBot(api, store, options = {}) {
       }
     });
   });
+
   const send = (msg, threadID, imageKey) => {
     if (options.send) return options.send(msg, threadID, imageKey);
-    if (typeof msg === 'string' && imageKey) {
+    // Tối ưu siêu tốc: Bỏ qua upload ảnh multipart nếu không bật ENABLE_ATTACHMENTS
+    if (enableAttachments && typeof msg === 'string' && imageKey) {
       const imgPath = path.join(__dirname, '..', 'assets', `${imageKey}.png`);
       if (fs.existsSync(imgPath)) {
         return rawSend({ body: msg, attachment: fs.createReadStream(imgPath) }, threadID);
@@ -82,7 +86,29 @@ function createBot(api, store, options = {}) {
     }
     return rawSend(msg, threadID);
   };
-  const info = options.getThreadInfo || (threadID => api.getThreadInfo(threadID));
+
+  const rawInfo = options.getThreadInfo || (threadID => api.getThreadInfo(threadID));
+  const threadCache = new Map();
+  const CACHE_TTL = 5 * 60 * 1000; // 5 phút
+
+  async function info(threadID, force = false) {
+    const tid = String(threadID);
+    const nowTs = Date.now();
+    const cached = threadCache.get(tid);
+    if (!force && cached && (nowTs - cached.ts < CACHE_TTL)) {
+      return cached.details;
+    }
+    const details = await rawInfo(threadID);
+    if (details) {
+      threadCache.set(tid, { details, ts: nowTs });
+    }
+    return details;
+  }
+
+  function invalidateThreadCache(threadID) {
+    threadCache.delete(String(threadID));
+  }
+
   const remove = options.removeUserFromGroup || ((userID, threadID) => api.removeUserFromGroup(userID, threadID));
   const now = options.now || (() => Date.now());
   const features = createFeatures({ botID, store, send, info, now, dayKey, daysAgo, scoreBar });
@@ -101,6 +127,7 @@ function createBot(api, store, options = {}) {
   }
 
   async function handleJoin(event) {
+    invalidateThreadCache(event.threadID);
     const added = event.logMessageData?.addedParticipants || event.eventData?.addedParticipants || [];
     if (!Array.isArray(added) || !added.length) return;
     const found = await groupInfo(event.threadID, added);
@@ -136,6 +163,7 @@ function createBot(api, store, options = {}) {
   }
 
   async function handleLeave(event) {
+    invalidateThreadCache(event.threadID);
     const id = memberID(event.logMessageData?.leftParticipantFbId ?? event.eventData?.leftParticipantFbId);
     if (!id) return;
     const found = await groupInfo(event.threadID);
@@ -409,16 +437,17 @@ function createBot(api, store, options = {}) {
       );
     }
 
-    if (command === '!kick') return handleKick(event, await info(event.threadID));
-    if (command === '!qtv' || command === '!admin') return handleAdminList(event, await info(event.threadID), group);
+    const threadDetails = await info(event.threadID);
+    if (command === '!kick') return handleKick(event, threadDetails);
+    if (command === '!qtv' || command === '!admin') return handleAdminList(event, threadDetails, group);
     if (['!dogay', '!bangdogay', '!topgay'].includes(command))
-      return handleFunScore(command, event, await info(event.threadID), group);
+      return handleFunScore(command, event, threadDetails, group);
     if (!['!hoatdong', '!top', '!rank', '!imlang', '!thongke', '!stats'].includes(command))
-      return features.handleCommand(command, event, store.group(event.threadID), await info(event.threadID));
+      return features.handleCommand(command, event, store.group(event.threadID), threadDetails);
     
     const periodText = String(match[2] || '7').trim();
     if (!['7', '30'].includes(periodText)) return send('Chọn 7 hoặc 30 ngày, ví dụ: !hoatdong 30', event.threadID);
-    return handleStats(command, event, await info(event.threadID), group, Number(periodText));
+    return handleStats(command, event, threadDetails, group, Number(periodText));
   }
 
   return { handle, checkBirthdays: features.checkBirthdays };
