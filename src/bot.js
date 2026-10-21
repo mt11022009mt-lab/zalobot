@@ -50,7 +50,7 @@ function countFor(group, userID, period, now = Date.now()) {
 }
 
 function funScore(threadID, userID, day) {
-  const digest = createHash('sha256').update(`doquay-v1:${threadID}:${day}:${userID}`).digest();
+  const digest = createHash('sha256').update(`dogay-v1:${threadID}:${day}:${userID}`).digest();
   return digest.readUInt32BE(0) % 101;
 }
 
@@ -379,9 +379,9 @@ function createBot(api, store, options = {}) {
     const label = id => (names.get(id) || group.names[id] || id).slice(0, 30);
     const today = dayKey(now());
     const displayDate = `${today.slice(8, 10)}/${today.slice(5, 7)}/${today.slice(0, 4)}`;
-    const footer = '🎲 Chỉ số ngẫu nhiên vui vẻ mang tính giải trí trong ngày.';
+    const footer = '🎲 Chỉ số ngẫu nhiên để vui, không nói lên xu hướng tính dục.';
 
-    if (['!bangdoquay', '!topquay', '!bangdogay', '!topgay'].includes(command)) {
+    if (['!bangdogay', '!topgay', '!bangdoquay', '!topquay'].includes(command)) {
       const rows = members.map(id => ({ id, score: funScore(threadID, id, today) }))
         .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
       const medals = ['🥇 1.', '🥈 2.', '🥉 3.'];
@@ -389,7 +389,7 @@ function createBot(api, store, options = {}) {
         `▏${medals[index] || `   ${index + 1}.`} ${label(row.id)}\n▏   ${scoreBar(row.score, 8)} ${row.score}%`);
       return send(
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `▏◈ BẢNG ĐỘ QUẬY HÔM NAY\n` +
+        `▏◈ BẢNG ĐỘ GAY HÔM NAY\n` +
         `▏Ngày: ${displayDate} · ${members.length} thành viên\n` +
         `▏━━━━━━━━━━━━━━━━━━━\n` +
         `${lines.join('\n') || '▏Chưa có thành viên để xếp hạng.'}\n` +
@@ -401,7 +401,7 @@ function createBot(api, store, options = {}) {
       );
     }
 
-    const arg = String(event.body || '').replace(/^!(doquay|dogay)\b/i, '').trim();
+    const arg = String(event.body || '').replace(/^!(dogay|doquay)\b/i, '').trim();
     const mentioned = Object.keys(event.mentions || {});
     const target = memberID(event.messageReply?.senderID || mentioned[0] || (/^\d+$/.test(arg) ? arg : '') || event.senderID);
     if (!members.includes(target)) return send('Người này hiện không có trong nhóm.', threadID);
@@ -411,13 +411,13 @@ function createBot(api, store, options = {}) {
       .findIndex(row => row.id === target) + 1;
     return send(
       `━━━━━━━━━━━━━━━━━━━━\n` +
-      `▏◈ MÁY ĐO ĐỘ QUẬY · ${displayDate}\n` +
+      `▏◈ MÁY ĐO ĐỘ GAY · ${displayDate}\n` +
       `▏👤 Đối tượng: ${label(target)}\n` +
-      `▏Chỉ số quậy: ${scoreBar(score, 10)} ${score}%\n` +
+      `▏Chỉ số gay: ${scoreBar(score, 10)} ${score}%\n` +
       `▏🏅 Xếp hạng: Hạng ${rank}/${members.length} trong nhóm\n` +
       `▏━━━━━━━━━━━━━━━━━━━\n` +
       `▏${footer}\n` +
-      `▏💡 Gõ !bangdoquay để xem bảng xếp hạng hôm nay.\n` +
+      `▏💡 Gõ !bangdogay để xem bảng xếp hạng hôm nay.\n` +
       `━━━━━━━━━━━━━━━━━━━━`,
       threadID,
       'fun'
@@ -474,7 +474,7 @@ function createBot(api, store, options = {}) {
         `▏\n` +
         `▏🎉 GIẢI TRÍ & KẾT NỐI:\n` +
         `▏  • !ghepdoi (!ship): Bói độ hợp cạ ngẫu nhiên\n` +
-        `▏  • !doquay (!bangdoquay): Máy đo độ quậy hôm nay\n` +
+        `▏  • !dogay (!bangdogay): Máy đo độ gay hôm nay\n` +
         `▏  • !binhchon [Câu hỏi | PA 1 | PA 2]: Thăm dò ý kiến\n` +
         `▏  • !vote [số]  •  !ketqua  •  !dongbinhchon\n` +
         `▏\n` +

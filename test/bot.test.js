@@ -64,23 +64,23 @@ test('thống kê tin nhắn duy nhất và quyền kick', async () => {
 test('điểm vui ổn định trong ngày và bảng xếp hạng chỉ có thành viên', async () => {
   const x = setup();
   try {
-    const command = { type: 'message', threadID: 'g1', senderID: 'member', body: '!doquay' };
+    const command = { type: 'message', threadID: 'g1', senderID: 'member', body: '!dogay' };
     await x.bot.handle({ ...command, messageID: 'fun1' });
     const first = x.sent.at(-1);
     await x.bot.handle({ ...command, messageID: 'fun2' });
     assert.equal(x.sent.at(-1), first);
     assert.match(first, /Thành viên/);
-    assert.match(first, /MÁY ĐO ĐỘ QUẬY/);
-    assert.match(first, /Chỉ số quậy/);
+    assert.match(first, /MÁY ĐO ĐỘ GAY/);
+    assert.match(first, /Chỉ số gay/);
     assert.match(first, /Hạng \d\/2/);
-    await x.bot.handle({ ...command, messageID: 'fun3', body: '!bangdoquay' });
-    assert.match(x.sent.at(-1), /BẢNG ĐỘ QUẬY HÔM NAY/);
+    await x.bot.handle({ ...command, messageID: 'fun3', body: '!bangdogay' });
+    assert.match(x.sent.at(-1), /BẢNG ĐỘ GAY HÔM NAY/);
     assert.doesNotMatch(x.sent.at(-1), /🥇 Bot|🥈 Bot/);
-    // Hỗ trợ lệnh cũ !dogay & !bangdogay
-    await x.bot.handle({ ...command, messageID: 'fun4', body: '!dogay' });
-    assert.match(x.sent.at(-1), /MÁY ĐO ĐỘ QUẬY/);
-    await x.bot.handle({ ...command, messageID: 'fun5', body: '!bangdogay' });
-    assert.match(x.sent.at(-1), /BẢNG ĐỘ QUẬY HÔM NAY/);
+    // Hỗ trợ cả alias !doquay & !bangdoquay
+    await x.bot.handle({ ...command, messageID: 'fun4', body: '!doquay' });
+    assert.match(x.sent.at(-1), /MÁY ĐO ĐỘ GAY/);
+    await x.bot.handle({ ...command, messageID: 'fun5', body: '!bangdoquay' });
+    assert.match(x.sent.at(-1), /BẢNG ĐỘ GAY HÔM NAY/);
     assert.equal(funScore('g1', 'member', '2026-10-19'), funScore('g1', 'member', '2026-10-19'));
   } finally { x.cleanup(); }
 });

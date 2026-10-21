@@ -1,6 +1,6 @@
 # Bot Quản Lý Nhóm Messenger
 
-Bot trợ lý quản lý nhóm, thống kê tương tác, bảng bộ nhớ đếm tin nhắn vĩnh viễn, chào mừng thành viên mới, bình chọn, máy đo độ quậy và mini game kết nối nhóm.
+Bot trợ lý quản lý nhóm, thống kê tương tác, bảng bộ nhớ đếm tin nhắn vĩnh viễn, chào mừng thành viên mới, bình chọn, máy đo độ gay và mini game kết nối nhóm.
 
 ## Cài Đặt & Chạy Cục Bộ
 
@@ -26,8 +26,8 @@ Bot trợ lý quản lý nhóm, thống kê tương tác, bảng bộ nhớ đ�
 | `!sinhnhat DD/MM` | Cài đặt ngày sinh nhật (bot tự động gửi thiệp chúc lúc 08:00 sáng). Dùng `!sinhnhat xem` hoặc `!sinhnhat xoa`. |
 | `!binhchon Câu hỏi \| A \| B` | Tạo cuộc bình chọn có 2–5 lựa chọn. React 1️⃣–5️⃣ hoặc gõ `!vote [1-5]` để bỏ phiếu. |
 | `!ketqua` / `!dongbinhchon` | Xem kết quả bình chọn / QTV hoặc người tạo đóng bình chọn. |
-| `!doquay` (hoặc `!dogay`) | Máy đo độ quậy ngẫu nhiên hôm nay của bản thân hoặc người được tag / reply. |
-| `!bangdoquay` (hoặc `!bangdogay`) | Bảng xếp hạng độ quậy của các thành viên trong nhóm hôm nay. |
+| `!dogay` (hoặc `!doquay`) | Máy đo độ gay ngẫu nhiên hôm nay của bản thân hoặc người được tag / reply. |
+| `!bangdogay` (hoặc `!topgay` / `!bangdoquay`) | Bảng xếp hạng độ gay của các thành viên trong nhóm hôm nay. |
 | `!ghepdoi` (hoặc `!ship`) | Ghép đôi bói độ hợp cạ ngẫu nhiên giữa 2 thành viên. |
 | `!qtv` / `!admin` | Xem danh sách ban quản trị nhóm hiện tại. |
 | `!canhbao [tag/reply/ID] [lý do]` | Quản trị viên cảnh cáo thành viên vi phạm (`!canhbao xem ID`, `!canhbao xoa ID`). |
