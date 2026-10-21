@@ -172,3 +172,59 @@ test('bình chọn bằng reaction, cảnh cáo của QTV và ghép đôi', asyn
     assert.match(x.sent.at(-1), /Thành viên × Quản trị/);
   } finally { x.cleanup(); }
 });
+
+test('tính năng chat AI qua lệnh !ai, tag bot và reply tin nhắn bot', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'messenger-group-bot-ai-'));
+  const store = new Store(path.join(dir, 'activity.json'));
+  const sent = [];
+  const aiPrompts = [];
+  const thread = {
+    isGroup: true, participantIDs: ['bot', 'admin', 'member'],
+    adminIDs: [{ id: 'bot' }, { id: 'admin' }],
+    userInfo: [
+      { id: 'bot', name: 'Bot' }, { id: 'admin', name: 'Quản trị' },
+      { id: 'member', name: 'Thành viên' }
+    ]
+  };
+  const api = { getCurrentUserID: () => 'bot' };
+  const bot = createBot(api, store, {
+    getThreadInfo: async () => thread,
+    send: async (text) => { sent.push(text); return { messageID: `bot${sent.length}` }; },
+    askAI: async (prompt) => {
+      aiPrompts.push(prompt);
+      return `Câu trả lời AI mẫu cho: ${prompt}`;
+    }
+  });
+
+  try {
+    const message = (senderID, id, body, extra = {}) => bot.handle({
+      type: 'message', threadID: 'g1', senderID, messageID: id, body, ...extra
+    });
+
+    // 1. Gõ !ai không có câu hỏi -> Hướng dẫn
+    await message('member', 'm1', '!ai');
+    assert.match(sent.at(-1), /Bạn hãy nhập câu hỏi sau lệnh/);
+
+    // 2. Gõ !ai có câu hỏi -> Gọi AI thành công
+    await message('member', 'm2', '!ai thủ đô của Việt Nam là gì?');
+    assert.match(sent.at(-1), /Câu trả lời AI mẫu cho: thủ đô của Việt Nam là gì\?/);
+    assert.equal(aiPrompts.length, 1);
+
+    // 3. Tag bot kèm câu hỏi
+    await message('member', 'm3', '@Bot thời tiết hôm nay thế nào?', {
+      mentions: { 'bot': '@Bot' }
+    });
+    assert.match(sent.at(-1), /Câu trả lời AI mẫu cho: thời tiết hôm nay thế nào\?/);
+    assert.equal(aiPrompts.length, 2);
+
+    // 4. Reply tin nhắn của bot để đàm thoại nối tiếp
+    await message('member', 'm4', 'Nói rõ hơn đi', {
+      messageReply: { senderID: 'bot', body: 'Thủ đô của Việt Nam là Hà Nội.' }
+    });
+    assert.match(sent.at(-1), /Câu trả lời AI mẫu cho:/);
+    assert.match(aiPrompts[2], /Thủ đô của Việt Nam là Hà Nội/);
+    assert.match(aiPrompts[2], /Nói rõ hơn đi/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

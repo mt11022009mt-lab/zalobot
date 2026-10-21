@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { createFeatures } = require('./features');
+const { askAI: defaultAskAI } = require('./ai');
 
 const TZ = 'Asia/Ho_Chi_Minh';
 const dayFormat = new Intl.DateTimeFormat('en-CA', {
@@ -111,7 +112,47 @@ function createBot(api, store, options = {}) {
 
   const remove = options.removeUserFromGroup || ((userID, threadID) => api.removeUserFromGroup(userID, threadID));
   const now = options.now || (() => Date.now());
+  const askAI = options.askAI || defaultAskAI;
   const features = createFeatures({ botID, store, send, info, now, dayKey, daysAgo, scoreBar });
+
+  async function handleAI(question, event, group, contextPrompt = null) {
+    const threadID = String(event.threadID);
+    const q = (question || '').trim();
+    if (!q) {
+      return send(
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏🤖 TRỢ LÝ AI\n` +
+        `▏Bạn hãy nhập câu hỏi sau lệnh nhé!\n` +
+        `▏Ví dụ: !ai thủ đô của Pháp là gì?\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
+        threadID
+      );
+    }
+
+    try {
+      let prompt = q;
+      if (contextPrompt) {
+        prompt = `[Ngữ cảnh câu trả lời trước đó của bot: "${contextPrompt}"]\nNgười dùng phản hồi tiếp: "${q}"`;
+      }
+      const answer = await askAI(prompt);
+      return send(
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏🤖 TRỢ LÝ AI\n` +
+        `${answer.split('\n').map(l => `▏${l}`).join('\n')}\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
+        threadID
+      );
+    } catch (err) {
+      console.error('[AI] Lỗi xử lý câu hỏi:', err?.message || err);
+      return send(
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏🤖 TRỢ LÝ AI\n` +
+        `▏Rất tiếc, AI đang bận xử lý dữ liệu. Bạn thử lại sau ít giây nhé!\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
+        threadID
+      );
+    }
+  }
 
   async function groupInfo(threadID, added = []) {
     const details = await info(threadID);
@@ -436,7 +477,7 @@ function createBot(api, store, options = {}) {
     if (String(event.senderID) === botID) return;
     const body = String(event.body || '').trim();
     console.log(`[Tin Nhắn Đến] Từ ${event.senderID} (nhóm ${event.threadID}): "${body}"`);
-    const match = /^!(hoatdong|top|rank|thongke|stats|imlang|kick|help|doquay|bangdoquay|topquay|dogay|bangdogay|topgay|demtin|bangtinnhan|tongtin|bonho|memory|profile|hoso|diemdanh|bangdiemdanh|bangtuongtac|sinhnhat|binhchon|vote|ketqua|dongbinhchon|canhbao|ship|ghepdoi|qtv|admin)(?:\s+(.*))?$/i.exec(body);
+    const match = /^!(hoatdong|top|rank|thongke|stats|imlang|kick|help|doquay|bangdoquay|topquay|dogay|bangdogay|topgay|demtin|bangtinnhan|tongtin|bonho|memory|profile|hoso|diemdanh|bangdiemdanh|bangtuongtac|sinhnhat|binhchon|vote|ketqua|dongbinhchon|canhbao|ship|ghepdoi|qtv|admin|ai|gpt|gemini|hoi)(?:\s+(.*))?$/i.exec(body);
     let group = store.data.groups[String(event.threadID)] ? store.group(event.threadID) : null;
     if (!group?.initialized) {
       console.log(`[Khởi Tạo Nhóm] Đang tải thông tin nhóm ${event.threadID}...`);
@@ -448,7 +489,32 @@ function createBot(api, store, options = {}) {
       group = found.group;
     }
     if (trackMessage(group, event)) features.trackInteractions(group, event);
-    if (!match) return;
+
+    if (!match) {
+      // Phản hồi thông minh khi tag bot hoặc reply tin nhắn của bot
+      const isReplyToBot = event.messageReply && String(event.messageReply.senderID) === botID;
+      const isMentionBot = event.mentions && Object.keys(event.mentions).includes(botID);
+
+      if (isReplyToBot && body && !body.startsWith('!')) {
+        const prevBotMsg = String(event.messageReply.body || '').replace(/^[▏━\s]+/gm, '').trim();
+        return handleAI(body, event, group, prevBotMsg.slice(0, 300));
+      }
+
+      if (isMentionBot && body && !body.startsWith('!')) {
+        let cleanBody = body;
+        for (const [mid, mname] of Object.entries(event.mentions)) {
+          if (mid === botID) {
+            cleanBody = cleanBody.replace(new RegExp(mname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '');
+          }
+        }
+        cleanBody = cleanBody.replace(/@\S+/g, '').trim();
+        if (cleanBody) {
+          return handleAI(cleanBody, event, group);
+        }
+      }
+      return;
+    }
+
     const command = `!${match[1].toLowerCase()}`;
     console.log(`[Khớp Lệnh] Người dùng ${event.senderID} gọi lệnh: ${command}`);
 
@@ -458,6 +524,10 @@ function createBot(api, store, options = {}) {
         `▏◈ TRUNG TÂM LỆNH BOT\n` +
         `▏Trợ lý tương tác & quản lý nhóm thông minh\n` +
         `▏━━━━━━━━━━━━━━━━━━━\n` +
+        `▏🤖 TRÍ TUỆ NHÂN TẠO (AI):\n` +
+        `▏  • !ai (!gpt/gemini/hoi) [câu hỏi]: Chat AI thông minh\n` +
+        `▏  • Tag @bot hoặc Reply tin nhắn để đàm thoại tự nhiên\n` +
+        `▏\n` +
         `▏👤 CÁ NHÂN:\n` +
         `▏  • !hoso (!profile): Thẻ định danh & cấp bậc\n` +
         `▏  • !diemdanh: Giữ lửa streak hàng ngày\n` +
@@ -486,6 +556,10 @@ function createBot(api, store, options = {}) {
         event.threadID,
         'help'
       );
+    }
+
+    if (['!ai', '!gpt', '!gemini', '!hoi'].includes(command)) {
+      return handleAI(match[2] || '', event, group);
     }
 
     const threadDetails = await info(event.threadID);
