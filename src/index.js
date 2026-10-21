@@ -89,6 +89,31 @@ if (process.env.PORT) {
 const statePath = path.resolve(process.env.APPSTATE_PATH || 'appstate.json');
 const dataPath = path.resolve(process.env.DATA_PATH || 'data/activity.json');
 
+const fbEmail = process.env.FB_EMAIL || '';
+const fbPassword = process.env.FB_PASSWORD || '';
+const fb2FA = (process.env.FB_2FA || '').replace(/\s+/g, '').toUpperCase();
+
+// If credentials are provided in env, dynamically ensure fca-config.json has them for auto-recovery
+if (fbEmail && fbPassword) {
+  try {
+    const cfgPath = path.resolve(process.cwd(), 'fca-config.json');
+    let cfg = {};
+    if (fs.existsSync(cfgPath)) {
+      cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    }
+    cfg.autoLogin = true;
+    cfg.credentials = {
+      email: fbEmail,
+      password: fbPassword,
+      twofactor: fb2FA || ''
+    };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf8');
+    console.log('[AutoLogin] Đã nạp cấu hình tự động đăng nhập (FB_EMAIL, FB_2FA).');
+  } catch (err) {
+    console.error('[AutoLogin] Lỗi lưu fca-config.json:', err.message);
+  }
+}
+
 let appState = null;
 
 if (process.env.APPSTATE_JSON) {
@@ -107,22 +132,18 @@ if (process.env.APPSTATE_JSON) {
 }
 
 if (!appState) {
-  if (!fs.existsSync(statePath)) {
-    console.error(`Chưa có phiên đăng nhập: ${statePath} hoặc biến môi trường APPSTATE_JSON.`);
-    setHealth('no_cookie', 'Chưa có file appstate.json hoặc biến môi trường APPSTATE_JSON');
-  } else {
+  if (fs.existsSync(statePath)) {
     try {
       appState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
     } catch (error) {
       console.error('Không đọc được AppState từ file:', error.message);
-      setHealth('cookie_corrupted', error.message);
     }
   }
 }
 
 if (appState && !Array.isArray(appState)) {
-  console.error('AppState phải là mảng cookie JSON hợp lệ.');
-  setHealth('cookie_invalid_format', 'AppState không phải dạng mảng');
+  console.warn('AppState không phải là mảng cookie JSON hợp lệ. Sẽ bỏ qua.');
+  appState = null;
 }
 
 process.on('uncaughtException', (err) => {
@@ -137,12 +158,22 @@ let currentApi = null;
 let reconnectTimer = null;
 
 function startBot() {
-  if (!Array.isArray(appState)) return;
+  const credentials = {};
+  if (Array.isArray(appState)) credentials.appState = appState;
+  if (fbEmail) credentials.email = fbEmail;
+  if (fbPassword) credentials.password = fbPassword;
+  if (fb2FA) credentials.twofactor = fb2FA;
+
+  if (!credentials.appState && (!credentials.email || !credentials.password)) {
+    console.error('Chưa có thông tin đăng nhập: thiếu appstate.json hoặc FB_EMAIL/FB_PASSWORD.');
+    setHealth('no_credentials', 'Thiếu appstate hoặc FB_EMAIL/FB_PASSWORD trong Environment Variables');
+    return;
+  }
 
   setHealth('logging_in');
   console.log('Đang đăng nhập vào Facebook Messenger...');
 
-  loginAsync({ appState }, {
+  loginAsync(credentials, {
     listenEvents: true,
     selfListen: false,
     autoReconnect: true,
@@ -171,6 +202,13 @@ function startBot() {
         console.error('Sự kiện cảnh báo Messenger MQTT:', errMsg);
 
         if (/blocked the login|not_logged_in|1357001|login_blocked/i.test(errMsg)) {
+          if (fbEmail && fbPassword) {
+            console.log('[AutoLogin] Phiên cookie cũ bị chặn, đang tự động đăng nhập lại bằng 2FA sau 10 giây...');
+            setHealth('reauthenticating', 'Phiên cũ hết hạn, đang tự động đăng nhập lại bằng 2FA...');
+            appState = null;
+            scheduleRetry(10000);
+            return;
+          }
           setHealth('auth_error', 'Facebook đã đăng xuất phiên đăng nhập này (Mã lỗi 1357001 / login_blocked). Cần lấy cookie mới.');
           return;
         }
@@ -202,7 +240,13 @@ function startBot() {
     console.error('Đăng nhập Messenger thất bại:', msg);
 
     if (/blocked the login|not_logged_in|1357001|login_blocked/i.test(msg)) {
-      setHealth('auth_error', 'Facebook chặn đăng nhập hoặc bắt đăng nhập lại (error 1357001). Cần cập nhật cookie mới.');
+      if (fbEmail && fbPassword && appState) {
+        console.log('[AutoLogin] Cookie cũ không hợp lệ, chuyển sang tự động đăng nhập bằng email + mật khẩu + 2FA...');
+        appState = null;
+        scheduleRetry(5000);
+        return;
+      }
+      setHealth('auth_error', 'Facebook chặn đăng nhập hoặc bắt đăng nhập lại (error 1357001). Cần kiểm tra lại tài khoản.');
     } else {
       setHealth('login_failed', msg);
       scheduleRetry();
@@ -210,13 +254,13 @@ function startBot() {
   });
 }
 
-function scheduleRetry() {
+function scheduleRetry(delayMs = 30000) {
   if (reconnectTimer) return;
-  console.log('Sẽ thử kết nối lại sau 30 giây...');
+  console.log(`Sẽ thử kết nối lại sau ${Math.round(delayMs / 1000)} giây...`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     startBot();
-  }, 30000);
+  }, delayMs);
 }
 
 startBot();
