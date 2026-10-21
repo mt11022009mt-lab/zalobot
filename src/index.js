@@ -2,9 +2,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const https = require('node:https');
 const http = require('node:http');
-const { loginAsync } = require('@dongdev/fca-unofficial');
-const { Store } = require('./store');
-const { createBot } = require('./bot');
 
 // Circular log buffer to inspect live logs via /logs endpoint
 const MAX_LOGS = 150;
@@ -30,6 +27,39 @@ const originalWarn = console.warn;
 console.log = (...args) => { originalLog(...args); captureLog('info', ...args); };
 console.error = (...args) => { originalError(...args); captureLog('error', ...args); };
 console.warn = (...args) => { originalWarn(...args); captureLog('warn', ...args); };
+
+// 0. Nạp cấu hình tự động đăng nhập (FB_EMAIL, FB_PASSWORD, FB_2FA) vào fca-config.json
+// TRƯỚC KHI require('@dongdev/fca-unofficial') để thư viện đọc được thông tin credentials khi khởi tạo
+const fbEmail = process.env.FB_EMAIL || '';
+const fbPassword = process.env.FB_PASSWORD || '';
+const fb2FA = (process.env.FB_2FA || '').replace(/\s+/g, '').toUpperCase();
+
+if (fbEmail && fbPassword) {
+  try {
+    const cfgPath = path.resolve(process.cwd(), 'fca-config.json');
+    let cfg = {};
+    if (fs.existsSync(cfgPath)) {
+      try {
+        cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      } catch {}
+    }
+    cfg.autoLogin = true;
+    cfg.credentials = {
+      email: fbEmail,
+      password: fbPassword,
+      twofactor: fb2FA || ''
+    };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf8');
+    console.log('[AutoLogin] Đã nạp cấu hình credentials vào fca-config.json trước khi tải thư viện FCA.');
+  } catch (err) {
+    console.error('[AutoLogin] Lỗi lưu fca-config.json:', err.message);
+  }
+}
+
+// Giờ mới load @dongdev/fca-unofficial để nó đọc fca-config.json đã có credentials
+const { loginAsync } = require('@dongdev/fca-unofficial');
+const { Store } = require('./store');
+const { createBot } = require('./bot');
 
 const health = {
   state: 'starting',
@@ -89,31 +119,6 @@ if (process.env.PORT) {
 const statePath = path.resolve(process.env.APPSTATE_PATH || 'appstate.json');
 const dataPath = path.resolve(process.env.DATA_PATH || 'data/activity.json');
 
-const fbEmail = process.env.FB_EMAIL || '';
-const fbPassword = process.env.FB_PASSWORD || '';
-const fb2FA = (process.env.FB_2FA || '').replace(/\s+/g, '').toUpperCase();
-
-// If credentials are provided in env, dynamically ensure fca-config.json has them for auto-recovery
-if (fbEmail && fbPassword) {
-  try {
-    const cfgPath = path.resolve(process.cwd(), 'fca-config.json');
-    let cfg = {};
-    if (fs.existsSync(cfgPath)) {
-      cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-    }
-    cfg.autoLogin = true;
-    cfg.credentials = {
-      email: fbEmail,
-      password: fbPassword,
-      twofactor: fb2FA || ''
-    };
-    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf8');
-    console.log('[AutoLogin] Đã nạp cấu hình tự động đăng nhập (FB_EMAIL, FB_2FA).');
-  } catch (err) {
-    console.error('[AutoLogin] Lỗi lưu fca-config.json:', err.message);
-  }
-}
-
 let appState = null;
 
 if (process.env.APPSTATE_JSON) {
@@ -172,6 +177,11 @@ function startBot() {
 
   setHealth('logging_in');
   console.log('Đang đăng nhập vào Facebook Messenger...');
+
+  if (global.fca && global.fca.config) {
+    global.fca.config.autoLogin = true;
+    global.fca.config.credentials = { email: fbEmail, password: fbPassword, twofactor: fb2FA };
+  }
 
   loginAsync(credentials, {
     listenEvents: true,
@@ -239,9 +249,9 @@ function startBot() {
     const msg = String(error?.message || error?.error || error);
     console.error('Đăng nhập Messenger thất bại:', msg);
 
-    if (/blocked the login|not_logged_in|1357001|login_blocked/i.test(msg)) {
+    if (/blocked the login|not_logged_in|1357001|login_blocked|auto-login|HTML does not show valid USER_ID/i.test(msg) || (fbEmail && fbPassword && appState)) {
       if (fbEmail && fbPassword && appState) {
-        console.log('[AutoLogin] Cookie cũ không hợp lệ, chuyển sang tự động đăng nhập bằng email + mật khẩu + 2FA...');
+        console.log('[AutoLogin] Session cookie cũ lỗi, chuyển sang tự động đăng nhập bằng email + mật khẩu + 2FA...');
         appState = null;
         scheduleRetry(5000);
         return;
