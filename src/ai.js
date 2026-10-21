@@ -8,7 +8,15 @@ Phong cách trò chuyện:
 /**
  * Gọi Pollinations AI (Miễn phí 100%, không cần API key)
  */
-async function askPollinations(prompt, systemPrompt = DEFAULT_SYSTEM_PROMPT) {
+async function askPollinations(prompt, options = {}) {
+  const systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  const messages = options.messages && options.messages.length > 0
+    ? [{ role: 'system', content: systemPrompt }, ...options.messages]
+    : [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt }
+      ];
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
 
@@ -17,10 +25,7 @@ async function askPollinations(prompt, systemPrompt = DEFAULT_SYSTEM_PROMPT) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt }
-        ],
+        messages,
         model: 'openai',
         seed: Math.floor(Math.random() * 1000000)
       }),
@@ -41,26 +46,33 @@ async function askPollinations(prompt, systemPrompt = DEFAULT_SYSTEM_PROMPT) {
 /**
  * Gọi Google Gemini API nếu có GEMINI_API_KEY
  */
-async function askGemini(prompt, apiKey, systemPrompt = DEFAULT_SYSTEM_PROMPT) {
+async function askGemini(prompt, apiKey, options = {}) {
+  const systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  const contents = options.messages && options.messages.length > 0
+    ? options.messages.map(m => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }]
+      }))
+    : [{ role: 'user', parts: [{ text: prompt }] }];
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
+  const timer = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const model = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+    // gemini-3.5-flash-lite là model thế hệ mới nhất cho tốc độ siêu tốc < 1s
+    const model = process.env.GEMINI_MODEL || options.model || 'gemini-3.5-flash-lite';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [
-          { role: 'user', parts: [{ text: prompt }] }
-        ],
+        contents,
         systemInstruction: {
           parts: [{ text: systemPrompt }]
         },
         generationConfig: {
-          maxOutputTokens: 1000,
+          maxOutputTokens: 800,
           temperature: 0.7
         }
       }),
@@ -82,15 +94,23 @@ async function askGemini(prompt, apiKey, systemPrompt = DEFAULT_SYSTEM_PROMPT) {
 }
 
 /**
- * Gọi OpenAI / Groq / DeepSeek API nếu có OPENAI_API_KEY
+ * Gọi OpenAI / Groq / DeepSeek API nếu có API key
  */
-async function askOpenAI(prompt, apiKey, systemPrompt = DEFAULT_SYSTEM_PROMPT) {
+async function askOpenAI(prompt, apiKey, options = {}) {
+  const systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  const messages = options.messages && options.messages.length > 0
+    ? [{ role: 'system', content: systemPrompt }, ...options.messages]
+    : [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt }
+      ];
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
+  const timer = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
-    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    const baseUrl = options.baseUrl || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+    const model = options.model || process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
@@ -100,11 +120,8 @@ async function askOpenAI(prompt, apiKey, systemPrompt = DEFAULT_SYSTEM_PROMPT) {
       },
       body: JSON.stringify({
         model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: 1000,
+        messages,
+        max_tokens: 800,
         temperature: 0.7
       }),
       signal: controller.signal
@@ -124,31 +141,43 @@ async function askOpenAI(prompt, apiKey, systemPrompt = DEFAULT_SYSTEM_PROMPT) {
 }
 
 /**
- * Hàm gọi AI thông minh tự động:
- * Ưu tiên: Gemini -> OpenAI -> Fallback Pollinations miễn phí
+ * Hàm gọi AI thông minh tự động đa tầng:
+ * Ưu tiên: Gemini 3.5 Flash-Lite (siêu tốc <1s) -> Groq (siêu tốc ~300ms) -> OpenAI -> Fallback Pollinations
  */
 async function askAI(prompt, options = {}) {
-  const systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
   const geminiKey = process.env.GEMINI_API_KEY;
+  const groqKey = process.env.GROQ_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
 
   if (geminiKey) {
     try {
-      return await askGemini(prompt, geminiKey, systemPrompt);
+      return await askGemini(prompt, geminiKey, options);
     } catch (err) {
       console.warn('[AI] Gemini lỗi, chuyển sang fallback:', err.message);
     }
   }
 
+  if (groqKey) {
+    try {
+      return await askOpenAI(prompt, groqKey, {
+        ...options,
+        baseUrl: 'https://api.groq.com/openai/v1',
+        model: process.env.GROQ_MODEL || 'llama-3.1-8b-instant'
+      });
+    } catch (err) {
+      console.warn('[AI] Groq lỗi, chuyển sang fallback:', err.message);
+    }
+  }
+
   if (openaiKey) {
     try {
-      return await askOpenAI(prompt, openaiKey, systemPrompt);
+      return await askOpenAI(prompt, openaiKey, options);
     } catch (err) {
       console.warn('[AI] OpenAI lỗi, chuyển sang fallback:', err.message);
     }
   }
 
-  return await askPollinations(prompt, systemPrompt);
+  return await askPollinations(prompt, options);
 }
 
 module.exports = {

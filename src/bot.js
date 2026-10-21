@@ -113,7 +113,71 @@ function createBot(api, store, options = {}) {
   const remove = options.removeUserFromGroup || ((userID, threadID) => api.removeUserFromGroup(userID, threadID));
   const now = options.now || (() => Date.now());
   const askAI = options.askAI || defaultAskAI;
+  const typing = options.sendTypingIndicator || ((threadID) => {
+    try {
+      api.sendTypingIndicator?.(threadID, () => {});
+    } catch {}
+  });
   const features = createFeatures({ botID, store, send, info, now, dayKey, daysAgo, scoreBar });
+
+  const OWNER_LIST = new Set([
+    '61590660586128', // UID chính chủ của bạn
+    ...(options.adminIDs || []),
+    ...(process.env.ADMIN_ID || '').split(','),
+    ...(process.env.OWNER_ID || '').split(',')
+  ].map(s => String(s).trim()).filter(Boolean));
+
+  function isOwner(senderID) {
+    return OWNER_LIST.has(String(senderID));
+  }
+
+  // Bộ nhớ đệm tin nhắn 1-1 riêng cho chủ bot để đàm thoại liên tục
+  const dmHistories = new Map();
+
+  async function handleOwnerDM(event, body) {
+    const senderID = String(event.senderID);
+    const threadID = String(event.threadID);
+    const text = (body || '').trim();
+
+    if (!text) return;
+
+    if (/^!(reset|clearchat|xoachat|lammoi)\b/i.test(text)) {
+      dmHistories.delete(senderID);
+      return send('🧹 Đã xóa toàn bộ lịch sử cuộc trò chuyện riêng với AI!', threadID);
+    }
+
+    const cleanQuestion = text.replace(/^!(ai|gpt|gemini|hoi)\s*/i, '').trim() || text;
+
+    // Bật hiệu ứng "đang soạn tin nhắn..." trên Facebook ngay lập tức
+    typing(threadID);
+
+    let history = dmHistories.get(senderID);
+    if (!history) {
+      history = [];
+      dmHistories.set(senderID, history);
+    }
+
+    history.push({ role: 'user', content: cleanQuestion });
+    if (history.length > 10) {
+      history.splice(0, history.length - 10);
+    }
+
+    try {
+      const answer = await askAI(cleanQuestion, { messages: [...history] });
+      history.push({ role: 'assistant', content: answer });
+
+      return send(
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `▏🤖 TRỢ LÝ AI (RIÊNG)\n` +
+        `${answer.split('\n').map(l => `▏${l}`).join('\n')}\n` +
+        `━━━━━━━━━━━━━━━━━━━━`,
+        threadID
+      );
+    } catch (err) {
+      console.error('[AI DM] Lỗi:', err?.message || err);
+      return send('⚠️ AI đang bận hoặc gặp sự cố tạm thời, bạn thử lại sau ít giây nhé!', threadID);
+    }
+  }
 
   async function handleAI(question, event, group, contextPrompt = null) {
     const threadID = String(event.threadID);
@@ -128,6 +192,9 @@ function createBot(api, store, options = {}) {
         threadID
       );
     }
+
+    // Bật hiệu ứng "đang soạn tin nhắn..." ngay khi nhận lệnh
+    typing(threadID);
 
     try {
       let prompt = q;
@@ -476,13 +543,27 @@ function createBot(api, store, options = {}) {
     if (event.type !== 'message' && event.type !== 'message_reply') return;
     if (String(event.senderID) === botID) return;
     const body = String(event.body || '').trim();
-    console.log(`[Tin Nhắn Đến] Từ ${event.senderID} (nhóm ${event.threadID}): "${body}"`);
+    console.log(`[Tin Nhắn Đến] Từ ${event.senderID} (thread ${event.threadID}): "${body}"`);
+
+    // 1. Kiểm tra tin nhắn riêng 1-1 (Direct Message)
+    const isDirect = event.isGroup === false || String(event.threadID) === String(event.senderID);
+    if (isDirect) {
+      if (!isOwner(event.senderID)) {
+        console.log(`[Tin Nhắn Riêng] Từ chối UID ${event.senderID} vì không phải chủ bot.`);
+        return send('Xin chào! Tính năng nhắn tin riêng 1-1 với trợ lý AI hiện chỉ được kích hoạt cho Chủ bot / Quản trị viên.', event.threadID);
+      }
+      return handleOwnerDM(event, body);
+    }
+
     const match = /^!(hoatdong|top|rank|thongke|stats|imlang|kick|help|doquay|bangdoquay|topquay|dogay|bangdogay|topgay|demtin|bangtinnhan|tongtin|bonho|memory|profile|hoso|diemdanh|bangdiemdanh|bangtuongtac|sinhnhat|binhchon|vote|ketqua|dongbinhchon|canhbao|ship|ghepdoi|qtv|admin|ai|gpt|gemini|hoi)(?:\s+(.*))?$/i.exec(body);
     let group = store.data.groups[String(event.threadID)] ? store.group(event.threadID) : null;
     if (!group?.initialized) {
       console.log(`[Khởi Tạo Nhóm] Đang tải thông tin nhóm ${event.threadID}...`);
       const found = await groupInfo(event.threadID);
       if (!found) {
+        if (isOwner(event.senderID)) {
+          return handleOwnerDM(event, body);
+        }
         console.warn(`[Bỏ Qua] Không thể lấy thông tin nhóm hoặc đây là chat 1-1 (thread ${event.threadID})`);
         return;
       }

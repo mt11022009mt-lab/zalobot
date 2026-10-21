@@ -228,3 +228,50 @@ test('tính năng chat AI qua lệnh !ai, tag bot và reply tin nhắn bot', asy
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('tính năng nhắn tin riêng 1-1 (DM) chỉ dành cho chủ bot', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'messenger-group-bot-dm-'));
+  const store = new Store(path.join(dir, 'activity.json'));
+  const sent = [];
+  const aiCalls = [];
+  const api = { getCurrentUserID: () => 'bot' };
+  const bot = createBot(api, store, {
+    adminIDs: ['owner123'],
+    getThreadInfo: async () => ({ isGroup: false }),
+    send: async (text) => { sent.push(text); return { messageID: `bot${sent.length}` }; },
+    askAI: async (prompt, opts) => {
+      aiCalls.push({ prompt, opts });
+      return `AI trả lời riêng: ${prompt}`;
+    }
+  });
+
+  try {
+    const dm = (senderID, id, body) => bot.handle({
+      type: 'message', threadID: senderID, senderID, messageID: id, body, isGroup: false
+    });
+
+    // 1. Người lạ nhắn riêng -> Bị từ chối lịch sự
+    await dm('stranger999', 's1', 'Chào bot');
+    assert.match(sent.at(-1), /chỉ được kích hoạt cho Chủ bot/);
+    assert.equal(aiCalls.length, 0);
+
+    // 2. Chủ bot nhắn riêng tự nhiên (không cần gõ !ai) -> AI trả lời ngay
+    await dm('owner123', 'o1', 'Hôm nay trời đẹp không?');
+    assert.match(sent.at(-1), /AI trả lời riêng: Hôm nay trời đẹp không\?/);
+    assert.equal(aiCalls.length, 1);
+    assert.equal(aiCalls[0].opts.messages.length, 1);
+
+    // 3. Chủ bot nhắn tiếp -> Lịch sử đàm thoại nối tiếp
+    await dm('owner123', 'o2', 'Thế chiều nay có mưa không?');
+    assert.match(sent.at(-1), /AI trả lời riêng: Thế chiều nay có mưa không\?/);
+    assert.equal(aiCalls.length, 2);
+    // History gồm: user q1, bot a1, user q2
+    assert.equal(aiCalls[1].opts.messages.length, 3);
+
+    // 4. Lệnh xóa lịch sử chat riêng !reset
+    await dm('owner123', 'o3', '!reset');
+    assert.match(sent.at(-1), /Đã xóa toàn bộ lịch sử cuộc trò chuyện riêng/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
