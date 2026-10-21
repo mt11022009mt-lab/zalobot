@@ -58,36 +58,58 @@ async function askGemini(prompt, apiKey, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
 
+  const candidateModels = [
+    process.env.GEMINI_MODEL,
+    options.model,
+    'gemini-flash-lite-latest',
+    'gemini-3.5-flash-lite',
+    'gemini-flash-latest'
+  ].filter(Boolean);
+
   try {
-    // gemini-3.5-flash-lite là model thế hệ mới nhất cho tốc độ siêu tốc < 1s
-    const model = process.env.GEMINI_MODEL || options.model || 'gemini-3.5-flash-lite';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    for (const model of candidateModels) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey
+          },
+          body: JSON.stringify({
+            contents,
+            systemInstruction: {
+              parts: [{ text: systemPrompt }]
+            },
+            generationConfig: {
+              maxOutputTokens: 800,
+              temperature: 0.7
+            }
+          }),
+          signal: controller.signal
+        });
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents,
-        systemInstruction: {
-          parts: [{ text: systemPrompt }]
-        },
-        generationConfig: {
-          maxOutputTokens: 800,
-          temperature: 0.7
+        if (res.status === 404) {
+          // Model không khả dụng, thử model tiếp theo trong danh sách
+          continue;
         }
-      }),
-      signal: controller.signal
-    });
 
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      throw new Error(`Gemini API ${res.status}: ${errBody.slice(0, 100)}`);
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => '');
+          throw new Error(`Gemini API ${res.status}: ${errBody.slice(0, 100)}`);
+        }
+
+        const data = await res.json();
+        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (reply) return reply.trim();
+      } catch (err) {
+        if (err.name === 'AbortError') throw err;
+        // Tiếp tục thử model kế tiếp nếu có lỗi 404/not found
+        if (/404|not found/i.test(err.message)) continue;
+        throw err;
+      }
     }
-
-    const data = await res.json();
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!reply) throw new Error('Gemini không trả về nội dung');
-    return reply.trim();
+    throw new Error('Không có model Gemini nào phản hồi thành công');
   } finally {
     clearTimeout(timer);
   }
