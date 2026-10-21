@@ -61,6 +61,35 @@ const { loginAsync } = require('@dongdev/fca-unofficial');
 const { Store } = require('./store');
 const { createBot } = require('./bot');
 
+const statePath = path.resolve(process.env.APPSTATE_PATH || 'appstate.json');
+const dataPath = path.resolve(process.env.DATA_PATH || 'data/activity.json');
+const store = new Store(dataPath);
+
+// Lưu dữ liệu an toàn trước khi tiến trình tắt (tránh mất bộ nhớ khi Render restart container)
+function gracefulShutdown(signal) {
+  console.log(`[Shutdown] Nhận tín hiệu ${signal}. Đang lưu dữ liệu bộ nhớ an toàn...`);
+  try {
+    store.save();
+    console.log('[Shutdown] Lưu dữ liệu bộ nhớ thành công.');
+  } catch (err) {
+    console.error('[Shutdown] Lỗi khi lưu dữ liệu:', err.message);
+  }
+}
+
+process.on('SIGTERM', () => {
+  gracefulShutdown('SIGTERM');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  gracefulShutdown('SIGINT');
+  process.exit(0);
+});
+
+process.on('beforeExit', () => {
+  gracefulShutdown('beforeExit');
+});
+
 const health = {
   state: 'starting',
   updatedAt: new Date().toISOString(),
@@ -85,6 +114,11 @@ if (process.env.PORT) {
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       const header = `=== NHẬT KÝ HOẠT ĐỘNG BOT MESSENGER (${health.state.toUpperCase()}) ===\nUptime: ${Math.round(process.uptime())}s | UID: ${health.uid || 'chưa có'}\n\n`;
       return res.end(header + recentLogs.join('\n'));
+    }
+
+    if (url === '/backup' || url === '/data') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(store.data, null, 2));
     }
 
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -115,9 +149,6 @@ if (process.env.PORT) {
     keepAliveTimer.unref?.();
   }
 }
-
-const statePath = path.resolve(process.env.APPSTATE_PATH || 'appstate.json');
-const dataPath = path.resolve(process.env.DATA_PATH || 'data/activity.json');
 
 let appState = null;
 
@@ -195,7 +226,7 @@ function startBot() {
     health.uid = myUid;
 
     api.setOptions({ listenEvents: true, selfListen: false, autoReconnect: true, emitReady: true });
-    const bot = createBot(api, new Store(dataPath));
+    const bot = createBot(api, store);
 
     setHealth('connected');
     console.log(`Bot đã kết nối Messenger thành công! UID: ${myUid}`);

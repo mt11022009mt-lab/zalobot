@@ -64,18 +64,51 @@ test('thống kê tin nhắn duy nhất và quyền kick', async () => {
 test('điểm vui ổn định trong ngày và bảng xếp hạng chỉ có thành viên', async () => {
   const x = setup();
   try {
-    const command = { type: 'message', threadID: 'g1', senderID: 'member', body: '!dogay' };
+    const command = { type: 'message', threadID: 'g1', senderID: 'member', body: '!doquay' };
     await x.bot.handle({ ...command, messageID: 'fun1' });
     const first = x.sent.at(-1);
     await x.bot.handle({ ...command, messageID: 'fun2' });
     assert.equal(x.sent.at(-1), first);
     assert.match(first, /Thành viên/);
-    assert.match(first, /Chỉ số ngẫu nhiên/);
+    assert.match(first, /MÁY ĐO ĐỘ QUẬY/);
+    assert.match(first, /Chỉ số quậy/);
     assert.match(first, /Hạng \d\/2/);
-    await x.bot.handle({ ...command, messageID: 'fun3', body: '!bangdogay' });
-    assert.match(x.sent.at(-1), /BẢNG ĐỘ GAY HÔM NAY/);
+    await x.bot.handle({ ...command, messageID: 'fun3', body: '!bangdoquay' });
+    assert.match(x.sent.at(-1), /BẢNG ĐỘ QUẬY HÔM NAY/);
     assert.doesNotMatch(x.sent.at(-1), /🥇 Bot|🥈 Bot/);
+    // Hỗ trợ lệnh cũ !dogay & !bangdogay
+    await x.bot.handle({ ...command, messageID: 'fun4', body: '!dogay' });
+    assert.match(x.sent.at(-1), /MÁY ĐO ĐỘ QUẬY/);
+    await x.bot.handle({ ...command, messageID: 'fun5', body: '!bangdogay' });
+    assert.match(x.sent.at(-1), /BẢNG ĐỘ QUẬY HÔM NAY/);
     assert.equal(funScore('g1', 'member', '2026-10-19'), funScore('g1', 'member', '2026-10-19'));
+  } finally { x.cleanup(); }
+});
+
+test('bảng bộ nhớ đếm tin nhắn vĩnh viễn và tự phục hồi khi bot restart hoặc file chính lỗi', async () => {
+  const x = setup();
+  try {
+    const msg1 = { type: 'message', threadID: 'g1', senderID: 'member', messageID: 'mem1', body: 'Test 1' };
+    const msg2 = { type: 'message', threadID: 'g1', senderID: 'member', messageID: 'mem2', body: 'Test 2' };
+    await x.bot.handle(msg1);
+    await x.bot.handle(msg2);
+
+    // Kiểm tra lệnh hiển thị bảng bộ nhớ đếm tin nhắn
+    await x.bot.handle({ type: 'message', threadID: 'g1', senderID: 'member', messageID: 'mem3', body: '!demtin' });
+    assert.match(x.sent.at(-1), /BẢNG BỘ NHỚ ĐẾM TIN NHẮN/);
+    assert.match(x.sent.at(-1), /Tổng tích luỹ: 3 tin nhắn/);
+    assert.match(x.sent.at(-1), /Thành viên: 3 tin/);
+
+    // Mô phỏng bot die và khởi động lại với Store mới từ cùng file
+    const restartedStore = new Store(x.store.file);
+    assert.equal(restartedStore.group('g1').messageCounts.member, 3);
+    assert.equal(restartedStore.group('g1').totalMessages, 3);
+
+    // Mô phỏng file chính bị corrupt do crash, Store tự phục hồi từ file backup .bak
+    fs.writeFileSync(x.store.file, '{ corrupted json ...');
+    const recoveredStore = new Store(x.store.file);
+    assert.equal(recoveredStore.group('g1').messageCounts.member, 3);
+    assert.equal(recoveredStore.group('g1').totalMessages, 3);
   } finally { x.cleanup(); }
 });
 

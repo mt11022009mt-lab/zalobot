@@ -119,12 +119,14 @@ function createFeatures({ botID, store, send, info, now, dayKey, daysAgo, scoreB
       const rankNum = ranking.indexOf(target) + 1;
       const rankBadge = rankNum === 1 ? '👑 Top 1 Quán Quân' : rankNum <= 3 ? '🥈 Top 3 Năng Nổ' : `Hạng #${rankNum}`;
       const streakProgress = Math.min(100, Math.round(((checkin.streak % 10) || (checkin.streak ? 10 : 0)) * 10));
+      const lifetimeCount = group.messageCounts?.[target] || count(target);
 
       return send(
         `━━━━━━━━━━━━━━━━━━━━\n` +
         `▏◈ HỒ SƠ THÀNH VIÊN · ${name(target)}\n` +
         `▏🏅 Hạng hoạt động: ${rankBadge} (#${rankNum}/${ranking.length})\n` +
         `▏💬 Tin nhắn 30 ngày: ${count(target)} tin\n` +
+        `▏💾 Tổng bộ nhớ tích luỹ: ${lifetimeCount} tin\n` +
         `▏📅 Điểm danh: ${checkin.total} ngày · chuỗi ${checkin.streak} ngày\n` +
         `▏Tiến trình mốc: ${renderBar(streakProgress, 10)} ${checkin.streak % 10}/10 ngày\n` +
         `▏🎂 Sinh nhật: ${group.birthdays[target] || 'Chưa đặt'}\n` +

@@ -11,8 +11,9 @@ fca-config.json
 .env.local
 .env.*.local
 
-# Bot runtime database & logs
-data/
+# Bot runtime database & logs (giữ data/activity.json để Render không bị mất dữ liệu khi restart)
+data/*.tmp
+data/*.bak
 Fca_Database/
 *.log
 *.tmp
