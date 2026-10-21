@@ -244,6 +244,26 @@ function startBot() {
     const birthdayTimer = setInterval(runBirthdays, 5 * 60 * 1000);
     birthdayTimer.unref?.();
 
+    // Heartbeat Keep-Alive: Giữ ấm phiên cookie Facebook mỗi 3 phút tránh bị thu hồi phiên
+    const heartbeatTimer = setInterval(() => {
+      if (currentApi && health.state === 'connected') {
+        const uid = currentApi.getCurrentUserID?.();
+        if (uid) {
+          currentApi.getUserInfo(uid, (err) => {
+            if (err) {
+              console.warn('[Heartbeat] Cảnh báo làm mới phiên:', err.message || err);
+            } else {
+              const freshState = currentApi.getAppState?.();
+              if (Array.isArray(freshState) && freshState.length > 0) {
+                appState = freshState;
+              }
+            }
+          });
+        }
+      }
+    }, 3 * 60 * 1000);
+    heartbeatTimer.unref?.();
+
     console.log('Bot đang theo dõi các nhóm Messenger của tài khoản này.');
   }).catch(error => {
     const msg = String(error?.message || error?.error || error);
